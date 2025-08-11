@@ -66,8 +66,7 @@ if not os.path.exists('markers/Human_UniProt_all.csv'):
 else:
     hs_dataset.add_markers('uniprot',   'markers/Human_UniProt_all.csv')
 
-hs_dataset.prune_markers('organelle', 'training', save_file=None)  
-
+hs_dataset.prune_markers('organelle', 'training')  
 
 hs_dataset.plot_umap_2d('init', ['organelle', 'uniprot', 'training'], ['SVM markers', 'UniProt', 'Training'], **plot_args)
 
@@ -76,11 +75,11 @@ hs_dataset.plot_umap_2d('init', ['organelle', 'uniprot', 'training'], ['SVM mark
 data_path2 = f'datasets/{source_tag}_UniProt_{run_tag}.npz'
 
 hs_dataset2 = SchisomeDataSet(data_path2, source_tag, aux_marker_key='svn_in')
-hs_dataset2.add_raw_profiles([profile_paths])
+hs_dataset2.add_raw_profiles(profile_paths)
 
 hs_dataset2.add_markers('organelle', 'markers/Human_UniProt_all.csv')
 hs_dataset2.add_markers('svn_in',    'markers/Human_U2OS_markers_nocplx.csv')
-hs_dataset2.prune_markers('organelle', 'training', save_file=None, sparse_classes=['ENDOSOME'])  
+hs_dataset2.prune_markers('organelle', 'training', sparse_classes=['ENDOSOME'])  
 
 hs_dataset2.plot_umap_2d('init', ['organelle', 'svn_in', 'training'], ['UniProt', 'SVM markers', 'Training'], **plot_args)
 
@@ -119,11 +118,11 @@ mm_dataset.plot_umap_2d('init', ['organelle', 'TAGM_good', 'training'], ['TAGM m
 data_path2 = f'datasets/{source_tag}_UniProt_{run_tag}.npz'
 
 mm_dataset2 = SchisomeDataSet(data_path2, source_tag, aux_marker_key='TAGM_good')
-mm_dataset2.add_raw_profiles([profile_paths])
+mm_dataset2.add_raw_profiles(profile_paths)
 mm_dataset2.normalize_profiles('init', col_norm=False)
 
 mm_dataset2.add_markers('organelle',  'markers/Mouse_UniProt_all.csv')
 mm_dataset2.add_markers('TAGM_good',  'markers/Mouse_E14_TAGMgood.csv')
 mm_dataset2.prune_markers('organelle', 'training')  
 
-mm_dataset2.plot_umap_2d('init', ['organelle', 'svn_in', 'training'], ['UniProt', 'TAGM good', 'Training'], **plot_args)
+mm_dataset2.plot_umap_2d('init', ['organelle', 'TAGM_good', 'training'], ['UniProt', 'TAGM good', 'Training'], **plot_args)

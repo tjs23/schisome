@@ -26,7 +26,7 @@ class SchisomeDataSet(BaseDataSet):
     
     def __init__(self, file_path, source_tag, aux_marker_key=None):
         
-        super().__init__(self, file_path, aux_marker_key)
+        super().__init__(file_path, aux_marker_key)
         
         self.source_tag = source_tag
     
@@ -1898,10 +1898,10 @@ class SchisomeDataSet(BaseDataSet):
         self._check_profile_label(label)
         
         if not recalc:
-                save_data = self.get_2d_proj(method, label)
+            save_data = self.get_2d_proj(method, label)
                 
-                if save_data:
-                        return save_data                
+            if save_data is not None:
+                return save_data                
         
         profile_data = self.get_profile_data(label)
         profile_data = np.nan_to_num(profile_data)

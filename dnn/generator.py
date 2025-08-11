@@ -10,7 +10,7 @@ class BaseGenerator(keras.utils.PyDataset): # Superclass
   
     def __init__(self, iter_idx, profiles_in, batch_size, training, nan_val=0.0):
         
-        super().__init__(self, workers=1, use_multiprocessing=False, max_queue_size=10)
+        super().__init__(workers=1, use_multiprocessing=False, max_queue_size=10)
         
         self.profiles_in = np.nan_to_num(profiles_in, nan_val) # Everything
         self.iter_idx = list(iter_idx) # Subset of knowns for training/testing

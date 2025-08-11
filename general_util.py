@@ -107,7 +107,7 @@ def get_uniprot_columns(queries, columns=['id','protein_name','gene_primary'], b
   while a < n:
     b = min(n, a+batch_size)
     if len(queries) > batch_size:
-      info(f' .. {a} - {b}', line_return=True)
+      info(f'\r .. {a} - {b}')
     
     query_ids= '%20OR%20'.join(list(queries[a:b]))
     fields = '%2C'.join(['accession'] + columns)
@@ -132,7 +132,7 @@ def get_uniprot_columns(queries, columns=['id','protein_name','gene_primary'], b
     a = b  
   
   if len(queries) > batch_size:
-    info(f' .. {a}', line_return=True)
+    info(f'\r .. {a}')
   
   if len(columns) == 1:
     for pid in uniprot_dict:

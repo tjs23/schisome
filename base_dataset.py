@@ -7,6 +7,9 @@ from general_util import open_file, get_uniprot_columns, get_uniprot_alt_ids, ge
 from constants import PROFILE_TAG, PROJ_TAG, RAW_DATA_TAG, UNKNOWN, NAN
 from constants import MARKER_CLASSES_TAG, MARKER_COLORS_TAG, MARKER_LABELS_TAG, PRED_CLASSES_TAG, PRED_LABELS_TAG
 
+import warnings
+warnings.filterwarnings("ignore")
+
 class SchisomeException(Exception):
     
         def __init__(self, *args):
@@ -338,7 +341,7 @@ class BaseDataSet:
         mx = np.nanmax(profile_data, axis=1)
         div = mx - np.nanmin(profile_data, axis=1)
         nz = div != 0.0
-        profile_data[nz] /= mx(profile_data, axis=1)[nz,None]
+        profile_data[nz] /= mx[nz,None]
         
         self.set_profile_data(label, profile_data)
      
