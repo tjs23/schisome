@@ -4,6 +4,7 @@ NAN = float('nan')
 PROG_CHARS = ('#', '-')
 READ_BUFFER = 2**16
 # NumPy Zip format save keys
+ARRAY_VALUES_TAG = 'arrydata_'
 MARKER_CLASSES_TAG = 'mkrdata_'
 MARKER_COLORS_TAG = 'mkrcolors_'
 MARKER_LABELS_TAG = 'mkrclasses_'
