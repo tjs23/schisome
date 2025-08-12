@@ -11,7 +11,8 @@ from matplotlib.colors import LinearSegmentedColormap
 
 from constants import COLOR_DICT, DB_ORGANELLE_CONV_DICT, DB_ORGANELLE_INFO
 from sql_schema import DB_SCHEME
-from base_dataset import BaseDataSet
+from base_dataset import BaseDataSet, SchisomeException
+
 
 # Cleaner alternative to combines scores test all
 # Better scaling of reconstruction loss & simplify
@@ -21,13 +22,23 @@ from base_dataset import BaseDataSet
 class SchisomeDataSet(BaseDataSet):
     """
     This class extends the BaseDataset with DNN, plotting and analysis methods
-    """
+    """    
     
-    
-    def __init__(self, file_path, source_tag, aux_marker_key=None):
+    def __init__(self, file_path, source_tag=None, aux_marker_key=None):
         
         super().__init__(file_path, aux_marker_key)
-        
+                
+        if source_tag:
+            self._save_data({'source_tag':source_tag})
+            
+        else:
+            save_dict = self._get_save_dict()
+            source_tag = save_dict.get('source_tag')
+
+        if not source_tag:
+            msg = 'File for dataset does not contain "source_tag" and none was specified'
+            raise SchisomeException(msg)
+         
         self.source_tag = source_tag
     
     
@@ -2266,14 +2277,17 @@ class SchisomeDataSet(BaseDataSet):
         connection.close()            
 
  
-    def get_train_test_data(self, profile_label, marker_label=None, n_chunks=5, max_nan=10): 
+    def get_train_test_data(self, profile_label=None, marker_label=None, n_chunks=5, max_nan=10): 
         
         if marker_label:
             marker_data = self.get_marker_data(marker_label)
         else:
-            marker_data = None
+            marker_data = self.train_markers
         
-        profile_data = self.get_profile_data(profile_label)
+        if profile_label:
+            profile_data = self.get_profile_data(profile_label)
+        else:
+            profile_data = self.train_profiles
         
         valid = np.count_nonzero(np.isnan(profile_data), axis=-1) <= max_nan
         

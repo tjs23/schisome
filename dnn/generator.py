@@ -114,8 +114,8 @@ class SingleLocDataGenerator(BaseGenerator):
 class MixedLocReconstructDataGenerator(BaseGenerator):
     
     def __init__(self, iter_idx, profiles_in, known_klasses, replica_cols, batch_size=32,
-                             training=True, mask_min=0.05, mask_max=0.25, mask_val=0.0, rep_mask=0.25,
-                             n_mix=250, nan_val=0.0, max_null_corr=0.3):
+                 training=True, mask_min=0.05, mask_max=0.25, mask_val=0.0, rep_mask=0.25,
+                 n_mix=250, nan_val=0.0, max_null_corr=0.3):
         
         max_class = known_klasses.max()
         max_class += 1
@@ -196,10 +196,11 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
             while n_replace:
                 
                 ran_rows = np.random.randint(0, n_orig-1, (n_replace, max(self.replica_cols))) # Random real proteins, same for each replica
-                ran_rows = np.concatenate([ran_rows[:,:col] for col in self.replica_cols], axis=1)    # Clip to replica widths and join replicas
+                ran_rows = np.concatenate([ran_rows[:,:rep_width] for rep_width in self.replica_cols], axis=1) # Clip to replica widths and join replicas
+
                 ran_rows = ran_rows.ravel() # n_null * p
                 ran_cols = np.concatenate([np.arange(p) for i in range(n_replace)])
-                 
+                
                 profiles_in[null_idx,:] = profiles_in[ran_rows, ran_cols].reshape(n_replace, p)
                 corr_mat = 1.0 - distance.cdist(profiles_in[:n_orig], profiles_in[n_orig:], metric='correlation')
                 max_corrs = corr_mat.max(axis=0)

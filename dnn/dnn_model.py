@@ -2,9 +2,11 @@ import os
 import numpy as np
 import keras
 
+import tensorflow as tf
 from keras import layers, ops
-from tensorflow_probability.substrates import jax as tfp
-from generator import MixedLocReconstructDataGenerator
+#from tensorflow_probability.substrates import jax as tfp
+import tensorflow_probability as tfp
+from .generator import MixedLocReconstructDataGenerator
 
      
 # # # #  Custom losses and metrics  # # # #
@@ -129,6 +131,21 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
     return out_array_c, out_array_r, latent_array
 
 
+class BayesLayer(keras.Layer):
+    
+    def __init__(self, ndim, name, activation='gelu', *args, **kw):
+        
+        super().__init__(*args, **kw)
+        
+        self._bl_ndim = ndim
+        self._bl_name = name
+        self._bl_acti = activation
+         
+    def call(self, x):
+        
+        return tfp.layers.DenseReparameterization(self._bl_ndim, name=self._bl_name, activation=self._bl_acti)(x)
+
+
 def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noise_sigma=0.05):
     
     n_classes = data_generator.n_classes # One more than input markers/labels given on-the-fly null class
@@ -156,21 +173,21 @@ def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noi
     x1 = latent = layers.Reshape((ndim_compress,), name='reshape')(x1)
 
     # Reconstruction
-
-    x1_recon = tfp.layers.DenseReparameterization(ndim_compress, name='bnn_expand1', activation='gelu')(x1)
+    
+    x1_recon = BayesLayer(ndim_compress, name='bnn_expand1')(x1)
     x1_recon = layers.LayerNormalization()(x1_recon)
     
-    recon_out = tfp.layers.DenseReparameterization(prof_dim, name='bnn_expand12', activation='softplus')(x1_recon)
+    recon_out = BayesLayer(prof_dim, name='bnn_expand2', activation='softplus')(x1_recon)
 
     # Class mixtures
 
-    x1_class = tfp.layers.DenseReparameterization(ndim_compress, name='bnn_pred1', activation='gelu')(x1)
+    x1_class = BayesLayer(ndim_compress, name='bnn_pred1', activation='gelu')(x1)
     x1_class = layers.LayerNormalization()(x1_class)
     
-    x1_class = tfp.layers.DenseReparameterization(ndim_compress, name='bnn_pred2', activation='gelu')(x1_class)
+    x1_class = BayesLayer(ndim_compress, name='bnn_pred2', activation='gelu')(x1_class)
     x1_class = layers.LayerNormalization()(x1_class)
     
-    class_mix_out = tfp.layers.DenseReparameterization(n_classes, name='pred_out', activation='linear')(x1_class)
+    class_mix_out = BayesLayer(n_classes, name='pred_out', activation='linear')(x1_class)
  
     model = keras.Model([x_query_in, x_keys_in], [recon_out, latent, class_mix_out])
  
@@ -178,13 +195,13 @@ def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noi
  
  
  
-def train_model(model_path, test_idx, train_idx, profiles, replica_cols, klasses=None,
+def train_model(model_path, test_idx, train_idx, profiles, class_labels, replica_cols, 
                 n_mix=500, n_epochs=100, batch_size=32, init_learning_rate=1e-3,
                 ndim_compress=10, nlayers_att=4, nheads_att=2):
   
   # Test and train on-the-fly data generators to create mixed profiles and classes 
-  data_generator = MixedLocReconstructDataGenerator(train_idx, profiles, klasses, replica_cols, n_mix=n_mix)
-  data_generator_test = MixedLocReconstructDataGenerator(test_idx, profiles, klasses, replica_cols, training=False, n_mix=n_mix)
+  data_generator = MixedLocReconstructDataGenerator(train_idx, profiles, class_labels, replica_cols, n_mix=n_mix)
+  data_generator_test = MixedLocReconstructDataGenerator(test_idx, profiles, class_labels, replica_cols, training=False, n_mix=n_mix)
 
   model = get_model(data_generator, ndim_compress, nlayers_att, nheads_att)
 

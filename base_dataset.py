@@ -9,12 +9,14 @@ from constants import MARKER_CLASSES_TAG, MARKER_COLORS_TAG, MARKER_LABELS_TAG, 
 
 import warnings
 warnings.filterwarnings("ignore")
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 
 class SchisomeException(Exception):
     
-        def __init__(self, *args):
-        
-                super().__init__(args)
+    def __init__(self, *args):
+   
+        super().__init__(args)
 
 
 class BaseDataSet:
@@ -28,26 +30,33 @@ class BaseDataSet:
         
         file_root, file_ext = os.path.splitext(file_path)
             
+        self._data_store = file_path
+        self._temp_file = os.path.splitext(file_path)[0] + '__temp__.npz'
+        
         if os.path.exists(file_path):
             if file_ext != '.npz':
                 msg = 'File does not have .npz file extension'
                 raise SchisomeException(msg)
-                                        
+                
+            elif aux_marker_key:
+                self._save_data({'aux_marker_key': aux_marker_key})
+                
+            else:
+                save_dict = self._get_save_dict()
+                aux_marker_key = save_dict.get('aux_marker_key')
+                                            
         elif file_ext != '.npz':
-            file_path = f'{file_root}.npz'
-        
-        self._data_store = file_path
-        self._temp_file        = os.path.splitext(file_path)[0] + '__temp__.npz'
-        
+            file_path = f'{file_root}.npz'        
+         
         self._id_map = None
         self._raw_markers_key = 'organelle'
         self._train_markers_key = 'training'
         self._aux_markers_key = aux_marker_key
         
-        self._train_profile_key        = 'init'
+        self._train_profile_key = 'init'
         self._latent_profile_key = 'latent'
-        self._recon_profile_key        = 'recon'
-        self._zfill_profile_key        = 'zfill'
+        self._recon_profile_key = 'recon'
+        self._zfill_profile_key = 'zfill'
         
         self._pred_all_key = 'class_pred_all'                
         self._train_groups_key = 'train_groups'
@@ -952,20 +961,19 @@ class BaseDataSet:
         replica_widths = []
         
         keys = sorted([k for k in save_dict if k.startswith(RAW_DATA_TAG)])
-        
+         
         for key in keys:
             n, m = save_dict[key].shape
             print('Data size', n, m)
             replica_widths.append(m)
+  
         
         if len(replica_widths) == 1:
-            m = replica_widths[0]
-            replica_widths = []
-            
-            while m > 10:
-                replica_widths.append(10)
-                m -= 10
-                     
+            s = replica_widths[0]
+            for w in (11, 18, 16, 10): # Commoon TMT tag counts
+                if s % w == 0:
+                    replica_widths = [w]  * (s//w)
+                    break                     
         
         return replica_widths
 

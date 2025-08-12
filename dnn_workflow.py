@@ -1,4 +1,5 @@
 import os
+#os.environ["KERAS_BACKEND"] = "jax"
 import numpy as np
 from glob import glob
 from schisome import SchisomeDataSet
@@ -39,7 +40,7 @@ for data_path in data_paths:
     
     info(f'Fetching ensemble (size {n_models}) test/train data for {data_path}')
     
-    valid, idx_chunks, good_profiles, good_klasses = data_set.get_train_test_data(n_chunks=n_models, max_nan=max_nan)
+    valid, idx_chunks, valid_profiles, valid_class_labels = data_set.get_train_test_data(n_chunks=n_models, max_nan=max_nan)
     
     n = len(valid)
     m = np.count_nonzero(valid)
@@ -67,14 +68,14 @@ for data_path in data_paths:
         if os.path.exists(model_path) and not overwrite:
             info(f'Found existing {model_path}')
             continue
-        
-        info(f'Training model {m+1} with {len(train_idx):,} profiles, testing with {len(test_idx):,}')
             
         test_idx = idx_chunks[m]
         train_idx = np.concatenate(idx_chunks[:m] + idx_chunks[m+1:])    
         
-        history = dnn_model.train_model(model_path, test_idx, train_idx, good_profiles,
-                                        data_set.replica_cols, good_klasses, n_mix=250, n_epochs=n_epochs,
+        info(f'Training model {m+1} with {len(train_idx):,} profiles, testing with {len(test_idx):,}')
+        
+        history = dnn_model.train_model(model_path, test_idx, train_idx, valid_profiles, valid_class_labels,
+                                        data_set.replica_cols, n_mix=250, n_epochs=n_epochs,
                                         batch_size=batch_size, ndim_compress=ndim_compress, nlayers_att=nlayers_att)
     
         info(f'Saved {model_path}')
