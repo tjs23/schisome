@@ -3,19 +3,19 @@ import numpy as np
 from subprocess import Popen, PIPE
 from constants import READ_BUFFER, UNIPROT_URL, UNIPROT_ALT_ID_URL
 
-def info(msg):
+def info(msg, *args, **kw):
 
-  print('INFO: ' + msg)
+  print(f'INFO: {msg}', *args, **kw)
   
  
-def warn(msg):
+def warn(msg, *args, **kw):
 
-  print('WARN: ' + msg)
+  print(f'WARN: {msg}', *args, **kw)
 
 
-def critical(msg):
+def critical(msg, *args, **kw):
 
-  print('EXIT: ' + msg)
+  print(f'EXIT: {msg}', *args, **kw)
   print('STOP')
   sys.exit(0)
   
