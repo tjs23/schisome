@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from general_util import open_file, get_uniprot_columns, get_uniprot_alt_ids, get_color_array, info, warn
 
-from constants import PROFILE_TAG, PROJ_TAG, RAW_DATA_TAG, UNKNOWN, NAN
+from constants import PROFILE_TAG, PROJ_TAG, RAW_DATA_TAG, ARRAY_VALUES_TAG, UNKNOWN, NAN
 from constants import MARKER_CLASSES_TAG, MARKER_COLORS_TAG, MARKER_LABELS_TAG, PRED_CLASSES_TAG, PRED_LABELS_TAG
 
 import warnings
@@ -499,7 +499,7 @@ class BaseDataSet:
         self._check_marker_label(label)
 
         save_dict = self._get_save_dict()
-        return list(save_dict[MARKER_LABELS_TAG + label])
+        return [str(x) for x in save_dict[MARKER_LABELS_TAG + label]]
 
 
     def add_marker_proteins(self, marker_key, protein_ids, marker_labels, marker_colors=None):
@@ -692,20 +692,34 @@ class BaseDataSet:
                 
         self._info(f'Overall loaded {n:,} proteins covering {m} columns/fractions') 
     
-    @property
-    def profile_list(self):
+    
+    def get_profile_keys(self):
         
-        self._check_pids('fetch profile list')
-        profile_list = []
+        self._check_pids('fetch profile keys')
+        profile_keys = []
         save_dict = self._get_save_dict()
         
         for key in save_dict:
             if key.startswith(PROFILE_TAG):
                 label = key[len(PROFILE_TAG):]
-                profile_list.append(label)
+                profile_keys.append(label)
         
-        return profile_list
+        return profile_keys
 
+
+    def get_array_keys(self):
+        
+        self._check_pids('fetch array keys')
+        profile_keys = []
+        save_dict = self._get_save_dict()
+        
+        for key in save_dict:
+            if key.startswith(ARRAY_VALUES_TAG):
+                label = key[len(ARRAY_VALUES_TAG):]
+                profile_keys.append(label)
+        
+        return profile_keys
+        
     
     def restore_original_profiles(self):
     
@@ -766,7 +780,36 @@ class BaseDataSet:
         
         else:
             return None
+
+
+    def get_array_data(self, label):
+    
+        self._check_pids('fetch array data')
+        self._check_marker_label(label)
+        
+        save_dict = self._get_save_dict()
+        return save_dict[ARRAY_VALUES_TAG + label]
+   
             
+    def set_array_data(self, label, values):
+        
+        self._check_pids('set array data')
+        
+        pids = self.proteins
+        n = len(pids)
+
+        if values.ndim != 1:
+            msg = f'Values are not a one dimensional array'
+            raise SchisomeException(msg)
+        
+        if n != len(values):
+            msg = f'Value array length {len(values):,} does not match the number of proteins {n:,}'
+            raise SchisomeException(msg)            
+ 
+        new_data = {ARRAY_VALUES_TAG + label: values}
+                                
+        self._save_data(new_data)
+
 
     def set_pred_class_data(self, label, klass_data, klass_labels):
         
@@ -824,7 +867,7 @@ class BaseDataSet:
     def _check_profile_label(self, label):
     
         if not self.have_profile_label(label):
-            avail = ', '.join(self.profile_list)
+            avail = ', '.join(self.get_profile_keys())
             msg = f'Profile set "{label}" not in profiles list. Available: {avail}'
             raise SchisomeException(msg)
          
@@ -993,10 +1036,10 @@ class BaseDataSet:
     def write_profile_tsv(self, out_file_path, profiles=None, markers=None, write_blank=False):
         
         if markers is True:
-            markers = self.get_marker_keys
+            markers = self.get_marker_keys()
 
         if not profiles:
-            profiles = self.profile_list
+            profiles = self.get_profile_keys()
         
         save_dict = self._get_save_dict()
         n_lines = 0
