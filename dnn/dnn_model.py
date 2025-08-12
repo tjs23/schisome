@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import keras
 
@@ -7,8 +6,8 @@ from keras import layers, ops
 #from tensorflow_probability.substrates import jax as tfp
 import tensorflow_probability as tfp
 from .generator import MixedLocReconstructDataGenerator
+from ..general_util import info
 
-     
 # # # #  Custom losses and metrics  # # # #
 
 
@@ -44,7 +43,7 @@ def nonzero_mae_loss(y_true, y_pred, weights):
     
     valid = ops.cast(y_true > 0.0, dtype='float32') # Not NaN
     
-    diff =    weights * ops.abs(y_true-y_pred)
+    diff = weights * ops.abs(y_true-y_pred)
 
     return ops.divide_no_nan(ops.sum(valid * diff), ops.sum(valid * weights))
     
@@ -58,15 +57,17 @@ def nonzero_mae(x_in, y_true, y_pred, weights):
     return ops.divide_no_nan(ops.sum(diff), ops.sum(unmasked * weights))
 
 
-def neg_log_likelihood(y_true, y_pred, weights):
+def neg_log_likelihood(y_true, y_pred, weights, counts=100.0):
     
-    distrib = tfp.distributions.Multinomial(2, logits=y_pred)
-    
-    nll = distrib.log_prob(y_true)
+    #distrib = tfp.distributions.Multinomial(2, logits=y_pred)
+    #nll = distrib.log_prob(y_true)
+
+    distrib = tfp.distributions.Multinomial(2, probs=y_true)
+    nll = distrib.log_prob(counts * ops.softmax(y_true)) # Mixture proportions to counts
     
     nll = -ops.divide_no_nan(ops.sum(nll * weights), ops.sum(weights))
     
-    return    nll / 2e2
+    return nll
 
 
 def plot_model(image_path, data_set, batch_size=32, ndim_compress=10, nlayers_att=4, nheads_att=2):
@@ -110,10 +111,10 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
     n = len(all_idx)
     i = 0
     
-    print(f'Making inference for {n:,} profiles')
+    info(f'Making inference for {n:,} profiles')
     
     for batch, (x_in, y_true, weights) in enumerate(data_generator):
-        print(f' .. {i:,}')
+        info(f' .. {i:,}', end='\r')
         j = min(n, i+batch_size)
         
         for r in range(n_rep):
@@ -128,6 +129,8 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
 
         i = j
     
+    info('')
+
     return out_array_c, out_array_r, latent_array
 
 
