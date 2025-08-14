@@ -9,8 +9,6 @@ from constants import MARKER_CLASSES_TAG, MARKER_COLORS_TAG, MARKER_LABELS_TAG, 
 
 import warnings
 warnings.filterwarnings("ignore")
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-
 
 class SchisomeException(Exception):
     
@@ -60,7 +58,13 @@ class BaseDataSet:
         
         self._pred_all_key = 'class_pred_all'                
         self._train_groups_key = 'train_groups'
-
+    
+    
+    @property
+    def has_predictions(self):
+        
+        return self.has_pred_class_key(self._pred_all_key) 
+    
 
     @property
     def train_labels(self):
@@ -210,7 +214,7 @@ class BaseDataSet:
             os.rename(self._temp_file, self._data_store)
      
         else:
-            self._warning(f'Key {key} not present in "{self._data_store}"')
+            self.warn(f'Key {key} not present in "{self._data_store}"')
             
     
     def _save_data(self, new_data):
@@ -223,7 +227,7 @@ class BaseDataSet:
             os.rename(self._temp_file, self._data_store)
         
         else:
-            self._info(f'Creating save file "{self._data_store}"')
+            self.info(f'Creating save file "{self._data_store}"')
             np.savez(self._data_store, **new_data)
 
 
@@ -237,10 +241,10 @@ class BaseDataSet:
         if cache_file and os.path.exists(cache_file):
             if redo:
                 missing_in_cache = set(pids)
-                self._info(f'Remaking cache {cache_file}')
+                self.info(f'Remaking cache {cache_file}')
             
             else:
-                self._info(f'Reading cache {cache_file}')
+                self.info(f'Reading cache {cache_file}')
                 with open(cache_file) as file_obj:
                     head = file_obj.readline()
  
@@ -251,13 +255,13 @@ class BaseDataSet:
                 missing_in_cache = set([pid for pid in pids if pid not in up_dict])             
                              
         else:
-            self._info(f'Cannot find cache {cache_file}')
+            self.info(f'Cannot find cache {cache_file}')
             missing_in_cache = set(pids)
         
-        self._info(f'Cache size {len(up_dict):,}')
+        self.info(f'Cache size {len(up_dict):,}')
              
         if missing_in_cache:
-            self._info(f'Proteins missing in cache: {len(missing_in_cache):,}')
+            self.info(f'Proteins missing in cache: {len(missing_in_cache):,}')
             up_dict2 = get_uniprot_columns(sorted(missing_in_cache), ['gene_primary', 'protein_name', 'xref_araport', 'xref_tair'])
             up_dict.update(up_dict2)
             
@@ -268,7 +272,7 @@ class BaseDataSet:
                     missing_in_uniprot.append(pid)
             
             if missing_in_uniprot:
-                self._info(f'Invalid UniProt IDs {len(missing_in_uniprot):,}')
+                self.info(f'Invalid UniProt IDs {len(missing_in_uniprot):,}')
                 resolved = 0
  
                 old_to_new = get_uniprot_alt_ids()
@@ -298,7 +302,7 @@ class BaseDataSet:
                      line = f'{protein_id}\t{gene_name}\t{description}\t{xref_araport}\t{xref_tair}\n'
                      file_obj.write(line)
         
-            self._info(f'Updated {cache_file} with {len(up_dict):,} proteins')
+            self.info(f'Updated {cache_file} with {len(up_dict):,} proteins')
         
         if ('alt_ids' not in save_dict) or missing_in_cache:
             alt_ids = []
@@ -455,19 +459,19 @@ class BaseDataSet:
         return key in save_dict
     
     
-    def have_marker_label(self, label):
+    def has_marker_key(self, label):
         
         return self._have_label(MARKER_CLASSES_TAG, label)
 
 
-    def have_pred_class_label(self, label):
+    def has_pred_class_key(self, label):
         
         return self._have_label(PRED_CLASSES_TAG, label)
 
 
     def _check_marker_label(self, label):
         
-        if not self.have_marker_label(label):
+        if not self.has_marker_key(label):
             avail = ', '.join(self.get_marker_keys)
             msg = f'Marker set "{label}" not in marker list. Available: {avail}'
             raise SchisomeException(msg)
@@ -555,7 +559,7 @@ class BaseDataSet:
                 out_file_obj.write(line)
                 n_written += 1
         
-        self._info(f'Wrote {n_written:,} lines to {out_file_path}')
+        self.info(f'Wrote {n_written:,} lines to {out_file_path}')
         
          
     def get_pred_class_data(self, key):
@@ -605,12 +609,12 @@ class BaseDataSet:
         return list(save_dict.get('aids', []))
  
     
-    def _warning(self, msg):
+    def warn(self, msg):
     
         warn(msg)
     
     
-    def _info(self, msg):
+    def info(self, msg):
     
         info(msg)
                 
@@ -648,7 +652,7 @@ class BaseDataSet:
     def add_raw_profiles(self, file_paths):
         
         if self.proteins:
-            self._warning(f'Replacing raw profiles in {self._data_store}')
+            self.warn(f'Replacing raw profiles in {self._data_store}')
         
         pids = set()
         prof_dicts = []
@@ -659,7 +663,7 @@ class BaseDataSet:
             pids.update(prof_dict)
             prof_dicts.append(prof_dict)
             n_frac = len(next(iter(prof_dict.values())))
-            self._info(f'Loaded replicate {replica} data for {len(prof_dict):,} proteins covering {n_frac} columns/fractions from file_path')
+            self.info(f'Loaded replicate {replica} data for {len(prof_dict):,} proteins covering {n_frac} columns/fractions from file_path')
      
         pids = sorted(pids)
 
@@ -690,7 +694,7 @@ class BaseDataSet:
         new_data[PROFILE_TAG + self._train_profile_key] = comb_profiles
         self._save_data(new_data)
                 
-        self._info(f'Overall loaded {n:,} proteins covering {m} columns/fractions') 
+        self.info(f'Overall loaded {n:,} proteins covering {m} columns/fractions') 
     
     
     def get_profile_keys(self):
@@ -724,7 +728,7 @@ class BaseDataSet:
     def restore_original_profiles(self):
     
         if not self.proteins:
-            self._warning('No original profile data to restore')
+            self.warn('No original profile data to restore')
             return
      
         comb_profiles = []
@@ -740,7 +744,7 @@ class BaseDataSet:
         new_data = {PROFILE_TAG + 'initial': comb_profiles}
         self._save_data(new_data)
         
-        self._info(f'Restored data for {n} proteins covering {m} columns/fractions') 
+        self.info(f'Restored data for {n} proteins covering {m} columns/fractions') 
         
     
     def set_marker_data(self, label, marker_idx, marker_klasses, marker_colors=None):
@@ -855,7 +859,7 @@ class BaseDataSet:
         
         for key in save_dict:
             if key.startswith(PROJ_TAG) and key.endswith(label):
-                self._info(f'Removing {key}')
+                self.info(f'Removing {key}')
                 self._delete_save_data(key)
         
 
@@ -911,7 +915,7 @@ class BaseDataSet:
         self._check_pids('add markers')
         
         if label in self.get_marker_keys:
-            self._warning(f'Replacing marker set {label}')
+            self.warn(f'Replacing marker set {label}')
          
         id_mapping = self.id_map
         
@@ -965,10 +969,10 @@ class BaseDataSet:
                 example = example[:5] + ['...',]
                 
             example = ', '.join(example)    
-            self._warning(f'Cannot match {len(unknown):,} marker protein IDs to UniProt IDs. {example}')
+            self.warn(f'Cannot match {len(unknown):,} marker protein IDs to UniProt IDs. {example}')
 
         if missing:
-            self._warning(f'A total of {len(missing):,} marker protein IDs in "{file_path}" are not found in the main dataset.')
+            self.warn(f'A total of {len(missing):,} marker protein IDs in "{file_path}" are not found in the main dataset.')
             print(sorted(missing))
         
         klasses = list(set(klass_dict.values()))
@@ -993,7 +997,7 @@ class BaseDataSet:
         
         self._save_data(new_data)
 
-        self._info(f'Added markers "{label}": {n_added:,} proteins in {len(klasses)} classes')
+        self.info(f'Added markers "{label}": {n_added:,} proteins in {len(klasses)} classes')
 
                 
     @property
@@ -1007,7 +1011,6 @@ class BaseDataSet:
          
         for key in keys:
             n, m = save_dict[key].shape
-            print('Data size', n, m)
             replica_widths.append(m)
   
         
@@ -1141,7 +1144,7 @@ class BaseDataSet:
                 write(line)
                 n_lines += 1
         
-        self._info(f'Wrote {n_lines:,} lines to {out_file_path}')
+        self.info(f'Wrote {n_lines:,} lines to {out_file_path}')
     
     
     def add_uniprot_markers(self, label, cache_path='markers/UniProt_Human_cc_subcellular_location.tsv'):
@@ -1151,7 +1154,7 @@ class BaseDataSet:
         self._check_pids('add markers')
         
         if label in self.get_marker_keys:
-            self._warning(f'Replacing marker set {label}')
+            self.warn(f'Replacing marker set {label}')
         
         loc_dict = {}
         
@@ -1164,7 +1167,7 @@ class BaseDataSet:
         missing = [pid for pid in self.proteins if pid not in loc_dict]
         
         if missing:
-            self._warning(f'Missing UniProt cache info for {len(missing):,}')
+            self.warn(f'Missing UniProt cache info for {len(missing):,}')
             loc_dict.update(get_uniprot_columns(missing, ('cc_subcellular_location','reviewed')))
         
         with open(cache_path, 'w') as out_file_obj:
@@ -1180,7 +1183,7 @@ class BaseDataSet:
         
         for pid in loc_dict:
             if pid not in pids:
-                #self._warning(f'Cannot lookup UniProt ID {pid}')
+                #self.warn(f'Cannot lookup UniProt ID {pid}')
                 continue
 
             scl, is_reviewed = loc_dict[pid]
@@ -1288,4 +1291,4 @@ class BaseDataSet:
         
         self._save_data(new_data)
 
-        self._info(f'Added markers "{label}": {n_added:,} proteins in {len(klasses)} classes')
+        self.info(f'Added markers "{label}": {n_added:,} proteins in {len(klasses)} classes')

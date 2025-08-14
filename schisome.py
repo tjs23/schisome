@@ -150,7 +150,7 @@ class SchisomeDataSet(BaseDataSet):
                      continue
  
                  if np.isnan(x_vals[i]) or np.isnan(y_vals[i]):
-                     self._warning(f'No 2D projection location for {pid} : {selection[pid]}')
+                     self.warn(f'No 2D projection location for {pid} : {selection[pid]}')
                      continue
  
                  txt = selection[pid]
@@ -245,7 +245,7 @@ class SchisomeDataSet(BaseDataSet):
         if save_file:
             plt.savefig(save_file, dpi=400)
             plt.clf()
-            self._info(f'Saved image to {save_file}')
+            self.info(f'Saved image to {save_file}')
  
         else:
             plt.show()
@@ -255,7 +255,7 @@ class SchisomeDataSet(BaseDataSet):
     
     def _print_confusion_matrix(self, known, predicted):
 
-        self._info('Confusion matrix')
+        self.info('Confusion matrix')
         
         m = predicted.max()
  
@@ -266,7 +266,7 @@ class SchisomeDataSet(BaseDataSet):
             if k2 >= 0:
                 out_map[k1, k2] += 1
  
-        self._info(out_map) # Check pred classes match marker indices
+        self.info(out_map) # Check pred classes match marker indices
     
     
     def make_class_predictions(self, fit=True, fit_distrib_points=200, rv=stats.beta, single_thresh=0.8):
@@ -327,7 +327,7 @@ class SchisomeDataSet(BaseDataSet):
             
             return pdfs
 
-        self._info(f'Setting predictions, fitting p-values etc.')
+        self.info(f'Setting predictions, fitting p-values etc.')
         
         klass_labels = self.train_labels
         pred_class_scores = self.class_ensemble_preds
@@ -396,7 +396,7 @@ class SchisomeDataSet(BaseDataSet):
                 prediction2[i] = k2
 
             if i % 100 == 0:
-                self._info(f'{i:,} {n:,}', end='\r')
+                self.info(f'{i:,} {n:,}', end='\r')
  
         is_single = singularity > 0.1
         p_values = p_values2.copy()
@@ -429,7 +429,7 @@ class SchisomeDataSet(BaseDataSet):
         
         recon_label = self.recon_profile_key
         if not self.have_profile_label(recon_label):
-            self._warning(f'Cannot find inference/predictions {recon_label}')
+            self.warn(f'Cannot find inference/predictions {recon_label}')
             return
  
         # Separate exp conditions for inspection
@@ -439,7 +439,7 @@ class SchisomeDataSet(BaseDataSet):
  
         # Output data, maximal, unfiltered
         msg = 'Loading inference scores'
-        self._info(msg)
+        self.info(msg)
         recon_profiles = self.recon_profiles
         latent_profiles = self.latent_profiles
         pred_score_ensemble = self.class_ensemble_preds  
@@ -461,7 +461,7 @@ class SchisomeDataSet(BaseDataSet):
         pred_klass_labels = self.get_marker_labels('predictions')
         
         if pred_klass_labels != klass_labels:
-            self._info(f'Re-indexing class labels to match predictions')
+            self.info(f'Re-indexing class labels to match predictions')
  
             idx_map = {-1:-1} # Old to new
             for i, x in enumerate(klass_labels):
@@ -476,7 +476,7 @@ class SchisomeDataSet(BaseDataSet):
         
         # Where prediction doesn't match training basic multplicity
         msg = 'Getting mismatches'
-        self._info(msg)
+        self.info(msg)
         mismatches = np.full(n, -1, int)
         different = (train_klasses != best_klass_idx) & (train_klasses >= 0)
         mismatches[different] = best_klass_idx[different]
@@ -484,14 +484,14 @@ class SchisomeDataSet(BaseDataSet):
  
         # Basic multiplicity
         msg = 'Getting Multiplicity'
-        self._info(msg)
+        self.info(msg)
         multiplicity = np.count_nonzero(mean_klass_scores > 0.3, axis=-1)
         multiplicity[best_klass_score > 0.8] = 1
         self.set_marker_data('multiplicity', multiplicity, ['m%d' % x for x in range(multiplicity.max())])
  
         # Missing content of data
         msg = 'Getting zero counts'
-        self._info(msg)
+        self.info(msg)
         zeros_count = np.count_nonzero(np.nan_to_num(init_profiles) == 0, axis=1)
         zeros_count = np.clip(zeros_count, 0, 20)
         self.set_marker_data('nzeros', zeros_count, ['z%d' % x for x in range(zeros_count.max()+1)])
@@ -501,7 +501,7 @@ class SchisomeDataSet(BaseDataSet):
         is_missing = np.nan_to_num(init_profiles) <= 0.0
         zfill_profiles = np.array(init_profiles)
         zfill_profiles[is_missing] = recon_profiles[is_missing]
-        self._info(msg)
+        self.info(msg)
         
         # Missing reconstruction
         for maxnan in (10,20,30,40,50):
@@ -524,14 +524,14 @@ class SchisomeDataSet(BaseDataSet):
  
         # Reconstruction, conservative
         msg = 'Getting conservative reconstruction'
-        self._info(msg)
+        self.info(msg)
         new_profiles =    np.array(recon_profiles)
         new_profiles[invalid,:] = 0.0
         self.set_profile_data(self.recon_profile_key, new_profiles)
  
         # Latent map, conservative
         msg = 'Getting conservative latent map'
-        self._info(msg)
+        self.info(msg)
         latent_profiles[invalid,:] = 0.0
         self.set_profile_data(self.latent_profile_key, latent_profiles)
     
@@ -570,11 +570,11 @@ class SchisomeDataSet(BaseDataSet):
         
         sufficiency = 100.0 * n1 / n
         
-        self._info('ALL DATA')
-        self._info(f'{tag} Rows:{n:,} Cols:{m} Zeros:{pc_zeros:.1f}% Mean Row Non-zero:{mean_nz:.1f} IQR:{q25_nz:.1f}-{q75_nz:.1f} Rows Non-zero>65%:{sufficiency:.2f}')
+        self.info('ALL DATA')
+        self.info(f'{tag} Rows:{n:,} Cols:{m} Zeros:{pc_zeros:.1f}% Mean Row Non-zero:{mean_nz:.1f} IQR:{q25_nz:.1f}-{q75_nz:.1f} Rows Non-zero>65%:{sufficiency:.2f}')
         
-        self._info('SUFFICIENT DATA')
-        self._info(f'{tag} Rows:{n1:,} Cols:{m} Zeros:{pc_recon_zeros:.1f}% Mean Row Non-zero:{mean_valid_nz:.1f} IQR:{q25_valid_nz:.1f}-{q75_valid_nz:.1f} Abs. Recon. error {mean_err:.2f} IQR:{q25:.2f}-{q75:.2f}')
+        self.info('SUFFICIENT DATA')
+        self.info(f'{tag} Rows:{n1:,} Cols:{m} Zeros:{pc_recon_zeros:.1f}% Mean Row Non-zero:{mean_valid_nz:.1f} IQR:{q25_valid_nz:.1f}-{q75_valid_nz:.1f} Abs. Recon. error {mean_err:.2f} IQR:{q25:.2f}-{q75:.2f}')
         
     
     def save_pruned_table(self, tsv_path):
@@ -638,7 +638,7 @@ class SchisomeDataSet(BaseDataSet):
                 line = f'{p:.7f}\t{mk}\t{k1}\t{100.0*s1:.2f}\t{k2}\t{s2}\t{k3}\t{s3}\t{pid}\t{desc}\n'
                 out_file_obj.write(line)
                          
-        self._info(f'Write {len(table_data):,} lines to {tsv_path}')
+        self.info(f'Write {len(table_data):,} lines to {tsv_path}')
      
     
     def plot_l2_loss_distrib(self, klass_label=None, plim=1e-2):
@@ -797,12 +797,12 @@ class SchisomeDataSet(BaseDataSet):
         pcs = [100.0 * x for x in fracs]
         slabels = ['Total','Data deficient','Data sufficient','Classified','Training','Good','Mediocre','Uncertain']
  
-        self._info(f'{title}', end=' ')
+        self.info(f'{title}', end=' ')
  
         for slabel, count, pc in zip(slabels, counts, pcs):
-                self._info(f'{slabel}:{count:,} ({pc:.1f}%)', end=' ')
+                self.info(f'{slabel}:{count:,} ({pc:.1f}%)', end=' ')
  
-        self._info('')
+        self.info('')
  
         fig, ax = plt.subplots()
  
@@ -836,7 +836,7 @@ class SchisomeDataSet(BaseDataSet):
         n_double3 = np.count_nonzero(double & p_bad)
         n_other3    = np.count_nonzero(other & p_bad)
  
-        self._info(f'{title} Single:{n_single1:,} ({pc_single1:.1f}%) Double:{n_double1:,} ({pc_double1:.1f}%) Other:{n_other1:,} ({pc_other1:.1f}%)')
+        self.info(f'{title} Single:{n_single1:,} ({pc_single1:.1f}%) Double:{n_double1:,} ({pc_double1:.1f}%) Other:{n_other1:,} ({pc_other1:.1f}%)')
  
         c1 = '#00FF00'
         c2 = '#00B000'
@@ -953,7 +953,7 @@ class SchisomeDataSet(BaseDataSet):
                     line = f'{p:.7f}\t{k1}\t{100.0*s1:.2f}\t{k2}\t{100.0*s2:.2f}\t{k3}\t{s3}\t{tklass}\t{pid}\t{desc}\n'
                     out_file_obj.write(line)
  
-            self._info(f'Write {len(table_out):,} lines to {tsv_path}')
+            self.info(f'Write {len(table_out):,} lines to {tsv_path}')
  
         fig, ax = plt.subplots()
         fig.subplots_adjust(left=0.17, bottom=0.17, right=0.93, top=0.93, wspace=0.1, hspace=0.1)
@@ -998,7 +998,7 @@ class SchisomeDataSet(BaseDataSet):
  
         if save_path:
             plt.savefig(save_path, dpi=400)
-            self._info(f'Saved {save_path}')
+            self.info(f'Saved {save_path}')
  
         else:
             plt.show()
@@ -1022,7 +1022,7 @@ class SchisomeDataSet(BaseDataSet):
         
         dm = int(m//n) # Models per partition
         
-        self._info(f'Using {m:,} predictions, from {n} partitions, of {n_klasses} classes in {prots:,} proteins')
+        self.info(f'Using {m:,} predictions, from {n} partitions, of {n_klasses} classes in {prots:,} proteins')
         
         fig, ax = plt.subplots()
         
@@ -1219,7 +1219,7 @@ class SchisomeDataSet(BaseDataSet):
         
         if save_path:
             plt.savefig(save_path, dpi=400)
-            self._info(f'Saved {save_path}')
+            self.info(f'Saved {save_path}')
         
         else:        
             plt.show()
@@ -1294,7 +1294,7 @@ class SchisomeDataSet(BaseDataSet):
         if save_paths:
             save_path = save_paths.format(class1, class2)
             plt.savefig(save_path, dpi=200)
-            self._info(f'Saved {save_path}')
+            self.info(f'Saved {save_path}')
             plt.close()
  
         else:
@@ -1307,7 +1307,7 @@ class SchisomeDataSet(BaseDataSet):
 
         prof_data = self.train_profiles
  
-        #self._info(f'Data size for "{prof_label}": {prof_data.shape}')
+        #self.info(f'Data size for "{prof_label}": {prof_data.shape}')
  
         valid = self.get_valid_mask(min_nonzero)
  
@@ -1367,7 +1367,7 @@ class SchisomeDataSet(BaseDataSet):
             if save_paths:
                 save_path = save_paths.format(label)
                 plt.savefig(save_path, dpi=200)
-                self._info(f'Saved {save_path}')
+                self.info(f'Saved {save_path}')
                 plt.close()
  
         k += 1
@@ -1500,7 +1500,7 @@ class SchisomeDataSet(BaseDataSet):
                 if save_paths:
                     save_path = save_paths.format(key, i)
                     plt.savefig(save_path, dpi=400)
-                    self._info(f'Saved {save_path}')
+                    self.info(f'Saved {save_path}')
  
                 else:
                     plt.show()
@@ -1626,7 +1626,7 @@ class SchisomeDataSet(BaseDataSet):
  
             fig1.savefig(sf1, dpi=200)
             fig2.savefig(sf2, dpi=200)
-            self._info(f'Saved images to {sf1}, {sf2}')
+            self.info(f'Saved images to {sf1}, {sf2}')
  
         else:
             plt.show()
@@ -1780,11 +1780,11 @@ class SchisomeDataSet(BaseDataSet):
                 file_path = save_path.format(klass1.replace('/','or'))
                 fig.subplots_adjust(left=0.03, bottom=0.05, right=0.97, top=0.95, wspace=0.1, hspace=0.1)
                 fig.savefig(file_path, dpi=400)
-                self._info(f'Saved {file_path}')
+                self.info(f'Saved {file_path}')
                 file_path = save_path.format('comb_' + klass1.replace('/','or'))
                 fig0.subplots_adjust(left=0.1, bottom=0.05, right=0.98, top=0.92, wspace=0.1, hspace=0.1)
                 fig0.savefig(file_path, dpi=800)
-                self._info(f'Saved {file_path}')
+                self.info(f'Saved {file_path}')
             else:
                 plt.show(fig)
 
@@ -1880,17 +1880,17 @@ class SchisomeDataSet(BaseDataSet):
                              marker_labels=('prediction','prediction2'), marker_heads=('pred_primary_loc','pred_secondary_loc'),
                              score_heads=('p-value', 'single_score', 'dual_score')):
         
-        if not self.have_pred_class_label(pred_label):
-            self._warning(f'Cannot write prediction TSV file prediction data "{pred_label}" not known')
+        if not self.has_pred_class_key(pred_label):
+            self.warn(f'Cannot write prediction TSV file prediction data "{pred_label}" not known')
             return
 
         if not self.have_profile_label(score_label):
-            self._warning(f'Cannot write prediction TSV file profile data "{score_label}" not known')
+            self.warn(f'Cannot write prediction TSV file profile data "{score_label}" not known')
             return
         
         for label in marker_labels:
-            if not self.have_marker_label(label):
-                self._warning(f'Cannot write prediction TSV file marker track "{pred_label}" not known')
+            if not self.has_marker_key(label):
+                self.warn(f'Cannot write prediction TSV file marker track "{pred_label}" not known')
                 return
                 
         klass_labels = self.get_pred_class_labels(pred_label) + ['UNKNOWN']
@@ -1984,7 +1984,7 @@ class SchisomeDataSet(BaseDataSet):
             for key, row in sort_data:
                 write('\t'.join(row) + '\n')
                         
-        self._info(f'Wrote {n_prots:,} protein lines to {out_file_path}')
+        self.info(f'Wrote {n_prots:,} protein lines to {out_file_path}')
         
     
     def write_database(self, db_file_path, max_missing=0.35, min_contrib=0.05):
@@ -2007,10 +2007,10 @@ class SchisomeDataSet(BaseDataSet):
  
             for i in range(0, n, chunk_size):
                 j = min(i+chunk_size, n)
-                self._info(f' .. {label} {i} - {j}', line_return=True)
+                self.info(f' .. {label} {i} - {j}', line_return=True)
                 cursor.executemany(sql_smt, data_rows[i:j])
  
-            self._info(f' .. {label} {n}')
+            self.info(f' .. {label} {n}')
             cursor.close()
             connection.commit()
                 
@@ -2020,7 +2020,7 @@ class SchisomeDataSet(BaseDataSet):
         connection = sqlite3.connect(db_file_path)
         connection.text_factory = str
         
-        self._info('Make tables')
+        self.info('Make tables')
         cursor = connection.cursor()
         for table in DB_SCHEME:
             cursor.execute(table)
@@ -2034,7 +2034,7 @@ class SchisomeDataSet(BaseDataSet):
         class_labels2 = self.get_marker_labels(aux_annos) + ['UNKNOWN']
         suborganelles = [class_labels2[x] for x in self.get_marker_data(aux_annos)]
 
-        self._info('Add Compartments')
+        self.info('Add Compartments')
         cursor = connection.cursor()
         codes = set([DB_ORGANELLE_CONV_DICT.get(code, code) for code in organelles + suborganelles])
         inserts = [(code, DB_ORGANELLE_INFO[code][0], DB_ORGANELLE_INFO[code][1]) for code in codes]
@@ -2042,7 +2042,7 @@ class SchisomeDataSet(BaseDataSet):
         cursor.close()
         connection.commit()
 
-        self._info('Get protein alt IDs')
+        self.info('Get protein alt IDs')
         rev_map = self.rev_id_map
                         
         pred_data = self.class_ensemble_preds
@@ -2064,7 +2064,7 @@ class SchisomeDataSet(BaseDataSet):
         proj_2d = {}
         min_nonzero = 1.0 - max_missing        
         
-        self._info('Add Data Projections')        
+        self.info('Add Data Projections')        
         projections = []
         for src in proj_srcs:
             for method in ('umap', 'pca'):
@@ -2073,7 +2073,7 @@ class SchisomeDataSet(BaseDataSet):
                 if method == 'umap':
                     for nn in (30,20,10):
                         key = f'{src}_{method}_{nn}'
-                        self._info(f' .. {key}')
+                        self.info(f' .. {key}')
                         text = f'{proj_names[src]} {method.upper()} NN{nn}'
                         projections.append((key, text))
                         proj_2d[key] = self.get_profile_proj_2d(src, method, min_nonzero=min_nonzero, recalc=True, umap_neighbours=nn)
@@ -2082,7 +2082,7 @@ class SchisomeDataSet(BaseDataSet):
                     key = f'{src}_{method}'
                     text = f'{proj_names[src]} {method.upper()}'
                     projections.append((key, text))
-                    self._info(f' .. {key}')
+                    self.info(f' .. {key}')
                     proj_2d[key] = self.get_profile_proj_2d(src, method, min_nonzero=min_nonzero, recalc=True)
                 
         cursor = connection.cursor()
@@ -2115,7 +2115,7 @@ class SchisomeDataSet(BaseDataSet):
                 continue
             
             if pid in done:
-                self._warning(f's{pid} repeats')
+                self.warn(f's{pid} repeats')
                 continue
             else:
                 done.add(pid)
@@ -2167,17 +2167,17 @@ class SchisomeDataSet(BaseDataSet):
 
         sql_smt = 'INSERT INTO Protein (pid, alt_ids, description, gene_name, train_organelle, suborganelle, singleness, likely_single, pred_class1, pred_class2, pred_class3, pred_text, p_val, p_val_single, p_val_dual, completeness, novelty) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         _chunked_execute(connection, protein_inserts, sql_smt) 
-        self._info(f'Stored {len(protein_inserts):,} proteins to {db_file_path}')
+        self.info(f'Stored {len(protein_inserts):,} proteins to {db_file_path}')
 
         sql_smt = 'INSERT INTO CompartmentScore (compartment, protein, score, score_std) VALUES (?,?,?,?)'
         _chunked_execute(connection, protein_score_inserts, sql_smt) 
-        self._info(f'Stored {len(protein_score_inserts):,} scores to {db_file_path}')
+        self.info(f'Stored {len(protein_score_inserts):,} scores to {db_file_path}')
 
         sql_smt = 'INSERT INTO DataCoord (projection, protein, x, y) VALUES (?,?,?,?)'
         _chunked_execute(connection, protein_coord_inserts, sql_smt) 
-        self._info(f'Stored {len(protein_coord_inserts):,} coord pairs to {db_file_path}')
+        self.info(f'Stored {len(protein_coord_inserts):,} coord pairs to {db_file_path}')
         
-        self._info('Done')
+        self.info('Done')
         connection.close()            
 
  
@@ -2246,13 +2246,13 @@ class SchisomeDataSet(BaseDataSet):
              
              clear_train_class[labelled] = inconsistent
 
-             self._info(f'Round {i+1} : Removing {inconsistent.sum():,} of {len(labelled):,} labels from {n:,} profiles')
+             self.info(f'Round {i+1} : Removing {inconsistent.sum():,} of {len(labelled):,} labels from {n:,} profiles')
  
              for k, klass in enumerate(marker_klasses):
                    idx = (marker_idx == k).nonzero()[0]
  
                    if (klass in fixed_classes):
-                       self._info(f' .. keeping all of class {klass} : {len(idx):,}')
+                       self.info(f' .. keeping all of class {klass} : {len(idx):,}')
                        clear_train_class[idx] = False
                        
                    else:
@@ -2270,7 +2270,7 @@ class SchisomeDataSet(BaseDataSet):
                                     n_peripheral += 1
  
                            n_remove = clear_train_class[idx].sum()
-                           self._info(f' .. pruned class {klass} : removed {n_remove:,} of {len(idx):,} ; peripheral {n_peripheral:,}')
+                           self.info(f' .. pruned class {klass} : removed {n_remove:,} of {len(idx):,} ; peripheral {n_peripheral:,}')
  
  
              marker_idx[clear_train_class] = -1
