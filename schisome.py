@@ -70,7 +70,7 @@ class SchisomeDataSet(BaseDataSet):
         for profile_label in profile_labels:
             self._check_profile_label(profile_label)
         
-        marker_labels = self.get_marker_keys
+        marker_labels = self.marker_keys
         for class_label in class_labels:
             if class_label in marker_labels:
                 self._check_marker_label(class_label)
@@ -1991,12 +1991,12 @@ class SchisomeDataSet(BaseDataSet):
         
         import sqlite3
         
-        aux_annos = self._aux_marker_key
+        aux_annos = self._aux_markers_key
         
-        if 'pval' not in self.get_array_keys(): 
+        if 'pval' not in self.array_keys: 
             self.make_class_predictions() # prediction classes, pval, dulity etc.
             
-        if self.recon_profile_key not in  self.get_profile_keys():
+        if self.recon_profile_key not in self.profile_keys:
             self.make_profile_predictions(max_missing) # set latent, zfill
                    
         def _chunked_execute(connection, data_rows, sql_smt, label='rows', chunk_size=1000):
@@ -2007,7 +2007,7 @@ class SchisomeDataSet(BaseDataSet):
  
             for i in range(0, n, chunk_size):
                 j = min(i+chunk_size, n)
-                self.info(f' .. {label} {i} - {j}', line_return=True)
+                self.info(f' .. {label} {i} - {j}', end='\r')
                 cursor.executemany(sql_smt, data_rows[i:j])
  
             self.info(f' .. {label} {n}')

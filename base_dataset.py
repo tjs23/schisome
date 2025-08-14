@@ -170,13 +170,13 @@ class BaseDataSet:
     @property
     def aux_markers(self):
     
-        return self.get_marker_data(self._train_markers_key)
- 
- 
+        return self.get_marker_data(self._aux_markers_key)
+
+
     @property
-    def raw_markers_key(self):
+    def aux_markers_key(self):
     
-        return self._train_markers_key
+        return self._aux_markers_key
  
  
     def _check_file_path(self, file_path):
@@ -422,18 +422,18 @@ class BaseDataSet:
             
             
     @property
-    def get_marker_keys(self):
+    def marker_keys(self):
         
         self._check_pids('fetch marker list')
-        get_marker_keys = []
+        marker_keys = []
         save_dict = self._get_save_dict()
         
         for key in save_dict:
             if key.startswith(MARKER_CLASSES_TAG):
                 label = key[len(MARKER_CLASSES_TAG):]
-                get_marker_keys.append(label)
+                marker_keys.append(label)
         
-        return get_marker_keys
+        return marker_keys
         
 
     @property
@@ -472,7 +472,7 @@ class BaseDataSet:
     def _check_marker_label(self, label):
         
         if not self.has_marker_key(label):
-            avail = ', '.join(self.get_marker_keys)
+            avail = ', '.join(self.marker_keys)
             msg = f'Marker set "{label}" not in marker list. Available: {avail}'
             raise SchisomeException(msg)
             
@@ -609,14 +609,14 @@ class BaseDataSet:
         return list(save_dict.get('aids', []))
  
     
-    def warn(self, msg):
+    def warn(self, msg, *args, **kw):
     
-        warn(msg)
+        warn(msg, *args, **kw)
     
     
-    def info(self, msg):
+    def info(self, msg, *args, **kw):
     
-        info(msg)
+        info(msg, *args, **kw)
                 
         
     def _load_profile_file(self, file_path):
@@ -697,7 +697,8 @@ class BaseDataSet:
         self.info(f'Overall loaded {n:,} proteins covering {m} columns/fractions') 
     
     
-    def get_profile_keys(self):
+    @property
+    def profile_keys(self):
         
         self._check_pids('fetch profile keys')
         profile_keys = []
@@ -710,19 +711,20 @@ class BaseDataSet:
         
         return profile_keys
 
-
-    def get_array_keys(self):
+    
+    @property
+    def array_keys(self):
         
         self._check_pids('fetch array keys')
-        profile_keys = []
+        array_keys = []
         save_dict = self._get_save_dict()
         
         for key in save_dict:
             if key.startswith(ARRAY_VALUES_TAG):
                 label = key[len(ARRAY_VALUES_TAG):]
-                profile_keys.append(label)
+                array_keys.append(label)
         
-        return profile_keys
+        return array_keys
         
     
     def restore_original_profiles(self):
@@ -871,7 +873,7 @@ class BaseDataSet:
     def _check_profile_label(self, label):
     
         if not self.have_profile_label(label):
-            avail = ', '.join(self.get_profile_keys())
+            avail = ', '.join(self.profile_keys)
             msg = f'Profile set "{label}" not in profiles list. Available: {avail}'
             raise SchisomeException(msg)
          
@@ -914,7 +916,7 @@ class BaseDataSet:
     
         self._check_pids('add markers')
         
-        if label in self.get_marker_keys:
+        if label in self.marker_keys:
             self.warn(f'Replacing marker set {label}')
          
         id_mapping = self.id_map
@@ -1039,10 +1041,10 @@ class BaseDataSet:
     def write_profile_tsv(self, out_file_path, profiles=None, markers=None, write_blank=False):
         
         if markers is True:
-            markers = self.get_marker_keys()
+            markers = self.marker_keys
 
         if not profiles:
-            profiles = self.get_profile_keys()
+            profiles = self.profile_keys
         
         save_dict = self._get_save_dict()
         n_lines = 0
@@ -1153,7 +1155,7 @@ class BaseDataSet:
         
         self._check_pids('add markers')
         
-        if label in self.get_marker_keys:
+        if label in self.marker_keys:
             self.warn(f'Replacing marker set {label}')
         
         loc_dict = {}

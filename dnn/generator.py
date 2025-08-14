@@ -36,7 +36,7 @@ class BaseGenerator(keras.utils.Sequence): # Superclass
  
     def make_iterator(self):
  
-        pass # Overwite in subclass
+        return # Overwite in subclass
  
  
     def __len__(self):

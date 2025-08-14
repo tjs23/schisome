@@ -43,7 +43,7 @@ for data_path in data_paths:
                         
   umap_prof_keys = [train_key, zfill_key, latent_key]
   
-  for marker_key in (data_set.train_markers_key, data_set.pred_markers_key, data_set.aux_markers_key):
+  for marker_key in (data_set.train_markers_key, 'predictions', data_set.aux_markers_key):
       data_set.plot_umap_2d(umap_prof_keys, marker_key, umap_titles,
                             title=f'UMAP {tag} {marker_key} classes',
                             save_path=f'plots/{tag}_{marker_key}.png')
