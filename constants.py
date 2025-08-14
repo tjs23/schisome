@@ -64,8 +64,8 @@ COLOR_DICT = { 'RIBOSOME 40S':       '#000080',
                'MIDBODY': '#00FF00',
                'NUCLEOLI': '#00B0B0',
                'ER/GOLGI':           '#CCCC00',
-	           'TGN':                '#B080FF',
-	       '    VACUOLE':            '#00A000',
+	       'TGN':                '#B080FF',
+	       'VACUOLE':            '#00A000',
                'ENDOSOME':           '#00FFFF', #'#B080FF',
                'CYTOSKELETON':       '#008080',
                'CYTOSOL':            '#FF0000',
@@ -113,8 +113,8 @@ DB_ORGANELLE_CONV_DICT = {'MITOCHONDRIAL INNER MEMBRANE': 'MIM',
 DB_ORGANELLE_INFO = {'CEC':              ('Cytosol-ECM cluster','#FFEEDD'), # Cyt ext
                      'CGN':              ('Golgi-Nucleus cluster','#00A0A0'), # Golgi nuc
                      'CHLOROPLAST':      ('Chloroplast','#50FF20'),
-	                 'CHROMATIN':        ('Nuclear chromatin','#905020'),
-	                 'NUCLEUS-CHROMATIN':('Nuclear chromatin','#905020'),
+	             'CHROMATIN':        ('Nuclear chromatin','#905020'),
+	             'NUCLEUS-CHROMATIN':('Nuclear chromatin','#905020'),
                      'CNR':              ('Ribosome-adjascent','#A0FFA0'), # Next to ribo
                      'CYTOSOL':          ('Cytosol','#FF0000'),
                      'DUAL':             ('Dual localised','#DDDDDD'),
@@ -149,5 +149,37 @@ DB_ORGANELLE_INFO = {'CEC':              ('Cytosol-ECM cluster','#FFEEDD'), # Cy
                      'G1':               ('Test Group 1', '#00A0A0'),
                      'G2':               ('Test Group 2', '#FFEEDD'),
                      'G3':               ('Test Group 3', '#A0FFA0'),
-            } 
+            }
+            
+  
+class AnsiColors(object):
 
+    _ansi_esc_color_dict = {"end":'\033[0m',
+                            "bold":'\033[1m',
+                            "italic":'\033[2m',
+                            "underline":'\033[3m',
+                            "black":'\033[30m',
+                            "red":'\033[31m',
+                            "green":'\033[32m',
+                            "yellow":'\033[33m',
+                            "blue":'\033[34m',
+                            "magenta":'\033[35m',
+                            "cyan":'\033[36m',
+                            "white":'\033[37m',
+                            "grey":'\033[90m',
+                            "lt_red":'\033[91m',
+                            "lt_green":'\033[92m',
+                            "lt_yellow":'\033[93m',
+                            "lt_blue":'\033[94m',
+                            "lt_magenta":'\033[95m',
+                            "lt_cyan":'\033[96m',
+                            "lt_white":'\033[97m',}
+    
+    def __init__(self):
+       for key, val in self._ansi_esc_color_dict.items():
+           setattr(self, key, val)   
+
+    def wrap(self, text, color='blue'):
+       
+       return f"{self._ansi_esc_color_dict[color]}{text}{self._ansi_esc_color_dict['end']}"
+       
