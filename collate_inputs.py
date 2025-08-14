@@ -19,7 +19,6 @@ plot_args = dict(min_nonzero=0.9, spot_size=16)
 
 # # # # # # # # # # # # # # # # # # # # 
 
-## ## Add Miguel's experimental lists
 
 source_tag = 'Arabidopsis_PCSC'
 
