@@ -13,22 +13,24 @@ overwrite = False
 n_models = 10
 
 nlayers_att = 4
-batch_size = 64
+batch_size = 32
 n_epochs = 75
 n_infer_samples = 100  #  per model 
 
 for data_path in data_paths:
   
     data_set = SchisomeDataSet(data_path)
- 
+    
+    if data_set.has_predictions and not overwrite:
+       info(f'Prediction data already present for {data_path}')
+       continue
+       
     prof_dim = data_set.train_profiles.shape[-1]
  
     if prof_dim > 64:
         ndim_compress = 64
- 
     elif prof_dim > 32:
         ndim_compress = 32
- 
     else:
         ndim_compress = 16
       
@@ -36,7 +38,7 @@ for data_path in data_paths:
     
     run_tag = os.path.splitext(os.path.basename(data_path))[0]
     
-    model_paths = [f'models/DNN_Model_v{m:02d}_{run_tag}.h5' for m in range(n_models)]
+    model_paths = [f'models/DNN_Model_v{m:02d}_{run_tag}.weights.h5' for m in range(n_models)]
     
     info(f'Fetching ensemble (size {n_models}) test/train data for {data_path}')
     
@@ -94,7 +96,7 @@ for data_path in data_paths:
     latent_profiles = []
     
     for m, model_path in enumerate(model_paths):
-
+        info(f'Working on model {m} : {model_path}')
         class_vecs, recon_vecs, latent_vecs = dnn_model.make_inference(model_path, profiles, data_set.replica_cols,
                                                                        klasses, ndim_compress=ndim_compress,
                                                                        nlayers_att=nlayers_att, n_rep=n_infer_samples)
@@ -104,6 +106,7 @@ for data_path in data_paths:
         latent_profiles.append(latent_vecs)
     
     # Aggregate and stor model outputs
+    info(f'Aggregating results to {data_path}')
     
     # combine along replica axis
     pred_classes = np.concatenate(pred_classes, axis=1)
@@ -119,6 +122,7 @@ for data_path in data_paths:
  
     # Ensemble class predictions
     data_set.set_pred_class_data(data_set.class_ensemble_key, pred_classes, data_set.train_markers)
+    
     
 
 
