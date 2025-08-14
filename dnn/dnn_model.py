@@ -1,12 +1,27 @@
+import os, sys, time
 import numpy as np
-import keras
+from collections import defaultdict
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+import keras
 import tensorflow as tf
-from keras import layers, ops
+
+from keras import layers, ops, metrics
 #from tensorflow_probability.substrates import jax as tfp
 import tensorflow_probability as tfp
+
+sys.path.append(os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+
 from .generator import MixedLocReconstructDataGenerator
-from ..general_util import info
+from general_util import info, time_str
+from constants import AnsiColors
+
+ac = AnsiColors()
+
+keras.utils.set_random_seed(int(time.time()))
+
+REPORT_INTERVAL = 0.5
 
 # # # #  Custom losses and metrics  # # # #
 
@@ -15,8 +30,8 @@ def mix_acc_mask(y_true, y_pred, weights):
     
     is_classified = ops.cast(ops.max(y_true, axis=-1, keepdims=False) > 0.0, dtype='float32')
     
-    klass_true = ops.amax(y_true, axis=-1)
-    klass_pred = ops.amax(y_pred, axis=-1)
+    klass_true = ops.argmax(y_true, axis=-1)
+    klass_pred = ops.argmax(y_pred, axis=-1)
     
     is_close = ops.cast(klass_true == klass_pred, dtype='float32')
     
@@ -39,9 +54,9 @@ def mae_mask(x_in, y_true, y_pred, weights):
     return ops.divide_no_nan(ops.sum(diff), ops.sum(masked * weights))
 
 
-def nonzero_mae_loss(y_true, y_pred, weights):
+def nonzero_mae_loss(x_in, y_true, y_pred, weights):
     
-    valid = ops.cast(y_true > 0.0, dtype='float32') # Not NaN
+    valid = ops.cast(x_in > 0.0, dtype='float32') # Not NaN
     
     diff = weights * ops.abs(y_true-y_pred)
 
@@ -57,18 +72,50 @@ def nonzero_mae(x_in, y_true, y_pred, weights):
     return ops.divide_no_nan(ops.sum(diff), ops.sum(unmasked * weights))
 
 
-def neg_log_likelihood(y_true, y_pred, weights, counts=100.0):
+def neg_log_likelihood(y_true, y_pred, weights):
     
-    #distrib = tfp.distributions.Multinomial(2, logits=y_pred)
-    #nll = distrib.log_prob(y_true)
+    true_probs = y_true + 1e-9 # Prevent overflow from zeros
+    pred_probs = y_pred + 1e-9
+    
+    nll = true_probs * ops.log(pred_probs)
+    nll = -ops.divide_no_nan(ops.sum(nll * weights), ops.sum(weights))    
+    
+    #distrib = tfp.distributions.Multinomial(2, probs=true_probs)    
+    #nll = distrib.log_prob(pred_probs) # Mixture proportions to counts
+    #nll = -ops.divide_no_nan(ops.sum(nll * weights), ops.sum(weights))
 
-    distrib = tfp.distributions.Multinomial(2, probs=y_true)
-    nll = distrib.log_prob(counts * ops.softmax(y_true)) # Mixture proportions to counts
-    
-    nll = -ops.divide_no_nan(ops.sum(nll * weights), ops.sum(weights))
-    
     return nll
 
+
+def _init_metrics(loss_names, acc_names, loss_met=metrics.Mean, acc_met=metrics.Mean):
+
+    loss_str = ' '.join([ac.yellow + name + ':' + ac.end + '{:5.3f}' for name in loss_names])
+    loss_str2 = ' '.join([ac.yellow + (' ' * (len(name) + 1)) + ac.end + ac.lt_cyan + '{:5.3f}' + ac.end for name in loss_names])
+    acc_str = ' '.join([ac.cyan + name + ':' + ac.end + '{:5.3f}' for name in acc_names])
+    acc_str2 = ' '.join([ac.cyan + (' ' * (len(name) + 1)) + ac.end + ac.lt_cyan + '{:5.3f}' + ac.end for name in acc_names])
+ 
+    report_line1 = ac.red + 'EP:' + ac.end + '{:3d}/{:3d} ' + ac.red + 'B:' + ac.end + '{:3d}/{:3d} ' + ac.lt_blue + 'T:' + ac.end + '{}/{} ' + loss_str + ' ' + acc_str
+    report_line2 = ac.lt_blue + '                     dT:' + ac.end + '{:5.1f}ms' + ac.lt_cyan + ' VAL: ' + ac.end + loss_str2 + ' ' + acc_str2
+    
+    loss_metrics = [(loss_met(name=mn), loss_met(name='val_'+mn)) for mn in loss_names]     
+    acc_metrics  = [(acc_met(name=f'am_{mn}'), acc_met(name=f'val_am_{mn}')) for mn in acc_names]
+    
+    return loss_metrics, acc_metrics, report_line1, report_line2
+    
+    
+def _report(epoch, n_epochs, batch, n_batches, v_time, t_taken, disp_time, loss_metrics, acc_metrics, report_line1, report_line2, mean_dt=None):
+     
+    acc_results = [m[0].result() for m in acc_metrics]    
+    batch_info = [epoch+1, n_epochs, batch+1, n_batches, time_str(t_taken), time_str(disp_time)]
+    batch_info += [m[0].result() for m in loss_metrics] + acc_results
+    end = '\n' if mean_dt else '\r'    
+    print(report_line1.format(*batch_info), end=end)
+    
+    if mean_dt: # Test/validation
+        acc_results = [m[1].result() for m in acc_metrics]
+        batch_info = [mean_dt] + [m[1].result() for m in loss_metrics] + acc_results
+        print(report_line2.format(*batch_info))
+ 
 
 def plot_model(image_path, data_set, batch_size=32, ndim_compress=10, nlayers_att=4, nheads_att=2):
     
@@ -88,7 +135,7 @@ def plot_model(image_path, data_set, batch_size=32, ndim_compress=10, nlayers_at
                            show_trainable=False)
                            
 
-def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=512,
+def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=128,
                    ndim_compress=10, nlayers_att=2, nheads_att=2, n_rep=100):
     
     all_idx = range(len(profiles))
@@ -101,12 +148,11 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
     out_array_c = np.zeros((n, n_rep, n_classes), np.float32)
     latent_array = np.zeros((n, n_rep, ndim_compress))
     
-    model = get_model(data_generator, n_classes, ndim_compress,
-                      nlayers_att, nheads_att, add_noise=False)
+    model = get_model(data_generator, ndim_compress, nlayers_att, nheads_att, noise_sigma=0.0)
     model.load_weights(model_path)
  
     ref_profiles = data_generator.ref_profiles
-    ref_profiles = ops.convert_to_tensor(ref_profiles)
+    #ref_profiles = ops.convert_to_tensor(ref_profiles)
 
     n = len(all_idx)
     i = 0
@@ -120,8 +166,9 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
         for r in range(n_rep):
             y_pred_r, latent, y_pred_c = model([x_in, ref_profiles], training=False)
                          
-            cat_probs = np.exp(y_pred_c[:j-i]) # Convert from output log probs
-            cat_probs /= cat_probs.sum(axis=-1)[:,None]
+            #cat_probs = np.exp(y_pred_c[:j-i]) # Convert from output log probs; softmax
+            #cat_probs /= cat_probs.sum(axis=-1)[:,None]
+            cat_probs = y_pred_c[:j-i]
             
             latent_array[i:j,r] = latent[:j-i]
             out_array_c[i:j,r] = cat_probs
@@ -134,20 +181,46 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
     return out_array_c, out_array_r, latent_array
 
 
-class BayesLayer(keras.Layer):
+class BayesInference(keras.Layer):
     
     def __init__(self, ndim, name, activation='gelu', *args, **kw):
         
         super().__init__(*args, **kw)
         
-        self._bl_ndim = ndim
-        self._bl_name = name
-        self._bl_acti = activation
+        self._tfp_layer = tfp.layers.DenseReparameterization(ndim, name=name, activation=activation)
          
     def call(self, x):
         
-        return tfp.layers.DenseReparameterization(self._bl_ndim, name=self._bl_name, activation=self._bl_acti)(x)
+        return self._tfp_layer(x)
 
+
+class CrossAttention(keras.Layer):
+
+    def __init__(self,  n_heads, att_dim, ff_dim, dropout=0.1, activation='gelu', kernel_initializer='he_normal',
+                 attention_mask=None, name='CA', *args, **kw):
+        
+        super().__init__(*args, **kw)
+        
+        self._attention_mask = attention_mask
+        
+        self._mha = layers.MultiHeadAttention(n_heads, att_dim, dropout=dropout)
+        self._norm1 = layers.LayerNormalization()
+        self._norm2 = layers.LayerNormalization()
+        self._dens1 = layers.Dense(ff_dim, activation=activation,
+                                   kernel_initializer=kernel_initializer)
+        self._dens2 = layers.Dense(att_dim,) # Simple, linear        
+        self._add1 = layers.Add()
+        self._add2 = layers.Add()
+        
+         
+    def call(self, query, key):
+        
+         x = self._mha(query, key, attention_mask=self._attention_mask, return_attention_scores=False)
+
+         att_out = self._norm1(self._add1([x, query]))
+ 
+         return self._norm2(self._add2([self._dens2(self._dens1(att_out)), att_out]))
+         
 
 def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noise_sigma=0.05):
     
@@ -169,31 +242,30 @@ def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noi
     x2 = ops.repeat(x2, data_generator.batch_size, axis=0) # Expand proteome ref profiles over minibatch 
 
     for i in range(nlayers_att):
-        layer = layers.MultiHeadAttention(nheads_att, ndim_compress, dropout=0.1, name=f'MHAttention_{i+1}')
-        x1 = layer(x1, x2, training=data_generator.training)
+        x1 = CrossAttention(nheads_att, ndim_compress, ndim_compress, name=f'MHAttention_{i+1}')(x1, x2)
    
-    #x1 = layers.LayerNormalization()(x1)
-    x1 = latent = layers.Reshape((ndim_compress,), name='reshape')(x1)
+    x1 = latent = layers.Reshape((ndim_compress,), name='latent')(x1)
+    x1 = layers.LayerNormalization()(x1)
 
     # Reconstruction
     
-    x1_recon = BayesLayer(ndim_compress, name='bnn_expand1')(x1)
+    x1_recon = BayesInference(ndim_compress, name='bnn_expand1')(x1)
     x1_recon = layers.LayerNormalization()(x1_recon)
     
-    recon_out = BayesLayer(prof_dim, name='bnn_expand2', activation='softplus')(x1_recon)
+    recon_out = BayesInference(prof_dim, name='recon_out', activation='softplus')(x1_recon)
 
     # Class mixtures
 
-    x1_class = BayesLayer(ndim_compress, name='bnn_pred1', activation='gelu')(x1)
+    x1_class = BayesInference(ndim_compress, name='bnn_pred1', activation='gelu')(x1)
     x1_class = layers.LayerNormalization()(x1_class)
     
-    x1_class = BayesLayer(ndim_compress, name='bnn_pred2', activation='gelu')(x1_class)
+    x1_class = BayesInference(ndim_compress, name='bnn_pred2', activation='gelu')(x1_class)
     x1_class = layers.LayerNormalization()(x1_class)
     
-    class_mix_out = BayesLayer(n_classes, name='pred_out', activation='linear')(x1_class)
+    class_mix_out = BayesInference(n_classes, name='pred_out', activation='softmax')(x1_class)
  
     model = keras.Model([x_query_in, x_keys_in], [recon_out, latent, class_mix_out])
- 
+    
     return model
  
  
@@ -202,27 +274,126 @@ def train_model(model_path, test_idx, train_idx, profiles, class_labels, replica
                 n_mix=500, n_epochs=100, batch_size=32, init_learning_rate=1e-3,
                 ndim_compress=10, nlayers_att=4, nheads_att=2):
   
-  # Test and train on-the-fly data generators to create mixed profiles and classes 
-  data_generator = MixedLocReconstructDataGenerator(train_idx, profiles, class_labels, replica_cols, n_mix=n_mix)
-  data_generator_test = MixedLocReconstructDataGenerator(test_idx, profiles, class_labels, replica_cols, training=False, n_mix=n_mix)
+    # Test and train on-the-fly data generators to create mixed profiles and classes
+    data_generator = MixedLocReconstructDataGenerator(train_idx, profiles, class_labels, replica_cols, n_mix=n_mix)
+    data_generator_test = MixedLocReconstructDataGenerator(test_idx, profiles, class_labels, replica_cols, training=False, n_mix=n_mix)
 
-  model = get_model(data_generator, ndim_compress, nlayers_att, nheads_att)
-
-  decay_steps = n_epochs * data_generator.n_batches  
-  learning_rate = keras.optimizers.schedules.CosineDecay(init_learning_rate, decay_steps, alpha=0.01)  
-  optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
-
-  metrics = {'acc_cat':mix_acc_mask, 'acc_recon':mae_acc,
-             'mae_recon':nonzero_mae, 'mae_mask':mae_mask}
-  
-  losses = {'loss_class':neg_log_likelihood ,'loss_recon':nonzero_mae_loss}
-  
-  model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
-
-  history = model.fit(data_generator, epochs=n_epochs, batch_size=batch_size, validation_data=data_generator_test)
-
-  model.save_weights(model_path)
-  
-  return history
-
+    model = get_model(data_generator, ndim_compress, nlayers_att, nheads_att)
+    
+    n_batches = data_generator.n_batches
+    learning_rate = keras.optimizers.schedules.CosineDecay(init_learning_rate, n_epochs * n_batches, alpha=0.01)
+    optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
+    
+    acc_funcs  = [mix_acc_mask, mae_acc, nonzero_mae, mae_mask]
+    loss_funcs = [neg_log_likelihood, nonzero_mae_loss]
    
+    acc_metric_names  = ['acc_cat', 'acc_recon', 'mae_recon', 'mae_msk']
+    loss_metric_names = ['loss_c','loss_r']
+
+    loss_metrics, acc_metrics, report_line1, report_line2 = _init_metrics(loss_metric_names, acc_metric_names)    
+    all_metrics = loss_metrics + acc_metrics
+ 
+    @tf.function
+    def test_train_step(x_train, y_true, weights, training=True):
+        x_in, x_ref = x_train
+        y_true_c, y_true_r = y_true
+        loss_func_c, loss_func_r = loss_funcs
+        loss_metric_c, loss_metric_r = loss_metrics
+ 
+        if training:
+            with tf.GradientTape() as tape:
+                y_pred_r, latent, y_pred_c = model(x_train)
+                loss_c = loss_func_c(y_true_c, y_pred_c, weights)
+                loss_r = loss_func_r(x_in, y_true_r, y_pred_r, weights)
+                loss = loss_c + loss_r
+ 
+            grads = tape.gradient(loss, model.trainable_variables)
+            optimizer.apply_gradients(zip(grads, model.trainable_variables))
+ 
+        else:
+            y_pred_r, latent, y_pred_c = model(x_train)
+            loss_c = loss_func_c(y_true_c, y_pred_c, weights)
+            loss_r = loss_func_r(x_in, y_true_r, y_pred_r, weights)
+            loss =  loss_c + loss_r
+ 
+        j = 0 if training else 1 # training, test
+        loss_metric_c[j](loss_c)
+        loss_metric_r[j](loss_r)
+
+        for i, (acc_metric, acc_func) in enumerate(zip(acc_metrics, acc_funcs)):
+            if i < 2:
+                acc_metric[j](acc_func(y_true_c, y_pred_c, weights))
+            else:
+                acc_metric[j](acc_func(x_in, y_true_r, y_pred_r, weights))
+    
+    mean_dt = 0
+    history = defaultdict(list)
+
+    for epoch in range(n_epochs):
+ 
+        for m1, m2 in all_metrics:
+            m1.reset_state()
+            m2.reset_state()
+ 
+        n_steps = 0.0
+        t_taken = 0.0
+        t_prev = 0.0
+        t_first = 0.0
+        epoch_start = time.time()
+ 
+        for batch, (x_train, y_true, weights) in enumerate(data_generator):
+                        
+            if batch == 0:
+                epoch_start = time.time() # After generator initialisation 
+                      
+            ref_input = data_generator.ref_profiles
+            test_train_step([x_train, ref_input], y_true, weights)
+ 
+            n_steps += 1.0
+            batch_end = time.time()
+ 
+            if batch_end > (t_prev + REPORT_INTERVAL):
+                t_taken = batch_end-epoch_start
+ 
+                if t_first:
+                    batch_time = (t_taken-t_first)/(n_steps-1.0)
+                    disp_time = t_first + (n_batches-1) * (batch_time)
+                else:
+                    t_first = t_taken
+                    batch_time = t_taken / n_steps
+                    disp_time = n_batches * batch_time # Est total
+
+                t_prev = batch_end                
+            
+                _report(epoch, n_epochs, batch, n_batches, 0.0, t_taken, disp_time,
+                        loss_metrics, acc_metrics, report_line1, report_line2)
+ 
+        t_taken = time.time()-epoch_start
+        mean_dt = int(1e3 * t_taken/n_steps) # Miliseconds
+        data_generator.on_epoch_end()
+        
+        # Test
+        for x_test, y_true, weights in data_generator_test:
+            test_train_step([x_test, ref_input], y_true, weights, training=False)
+ 
+        v_time = time.time()-epoch_start
+        v_time -= t_taken
+        
+        _report(epoch, n_epochs, batch, n_batches, v_time, t_taken, disp_time,
+                loss_metrics, acc_metrics, report_line1, report_line2, mean_dt)
+                
+        data_generator_test.on_epoch_end()
+ 
+        for m1, m2 in all_metrics:
+            history[m1.name].append(m1.result())
+            history[m2.name].append(m2.result())
+ 
+    print('')
+    info('Saving weights')
+ 
+    model.save_weights(model_path)
+ 
+    return history
+
+ 
+

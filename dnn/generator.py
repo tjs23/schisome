@@ -1,16 +1,17 @@
 import math
 import numpy as np
 import keras
+import tensorflow as tf
 
 from scipy.spatial import distance    
 from random import randint, random, shuffle, seed
 
 
-class BaseGenerator(keras.utils.PyDataset): # Superclass
+class BaseGenerator(keras.utils.Sequence): # Superclass
   
     def __init__(self, iter_idx, profiles_in, batch_size, training, nan_val=0.0):
         
-        super().__init__(workers=1, use_multiprocessing=False, max_queue_size=10)
+        #super().__init__(workers=1, use_multiprocessing=False, max_queue_size=10)
         
         self.profiles_in = np.nan_to_num(profiles_in, nan_val) # Everything
         self.iter_idx = list(iter_idx) # Subset of knowns for training/testing
@@ -19,17 +20,18 @@ class BaseGenerator(keras.utils.PyDataset): # Superclass
         self.iterator = None
         self.batch_size = batch_size
         self.training = training
- 
+        self.epoch = 0
+        
         self._set_reference()
- 
- 
+
+
     def _set_reference(self):
  
         # Reference array of all input profiles
  
         n, p = self.profiles_in.shape
         ref = np.array(self.profiles_in, dtype=np.float32).reshape(1, n, p)  # Will be broadcast to batches
-        self.ref_profiles = keras.ops.convert_to_tensor(ref)
+        self.ref_profiles = ref # keras.ops.convert_to_tensor(ref)
  
  
     def make_iterator(self):
@@ -43,23 +45,20 @@ class BaseGenerator(keras.utils.PyDataset): # Superclass
  
  
     def __getitem__(self, idx):
- 
+        
         if idx == 0:
-             self.iterator = self.make_iterator()
+            self.iterator = self.make_iterator()
  
-        x_inputs, y_true, weights = next(self.iterator)
+        data_items = next(self.iterator) 
+    
+        return data_items #x_inputs, y_true, weights    
+
+    def on_epoch_end(self):
  
-        return x_inputs, y_true, weights
-
-
-    def __iter__(self):
-  
-        if self.iterator is None:
-             self.iterator = self.make_iterator()
-             
-        return self.iterator
-
-
+      self.batch = 0
+      self.epoch += 1
+      self._iterator = None
+      
 
 class SingleLocDataGenerator(BaseGenerator):
     
@@ -115,24 +114,21 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
     
     def __init__(self, iter_idx, profiles_in, known_klasses, replica_cols, batch_size=32,
                  training=True, mask_min=0.05, mask_max=0.25, mask_val=0.0, rep_mask=0.25,
-                 n_mix=250, nan_val=0.0, max_null_corr=0.3):
+                 n_mix=250, nan_val=0.0, max_null_corr=0.45):
         
         max_class = known_klasses.max()
         max_class += 1
         
         if training:
             n_prof, n_cols = profiles_in.shape
-            n_null = n_prof 
-            null_idx = np.arange(n_prof, n_prof+n_null)
+            n_null = 2 * n_mix # n_prof 
             null_profs = np.zeros((n_null, n_cols))
             profiles_in = np.concatenate([profiles_in, null_profs]) # Outputs for nulls always nan so not trainable, inputs filled every batch
             known_klasses = np.concatenate([known_klasses, np.full(n_null, max_class)])
         
-        super().__init__(iter_idx, profiles_in, batch_size, training, nan_val)
-        
         ni = len(iter_idx)
         
-        if self.training:
+        if training:
             
             if n_mix:
                 k = max_class + 1
@@ -157,6 +153,8 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
         self.replica_cols = replica_cols
         self.max_null_corr = max_null_corr
         self.ran_seed = randint(1, 2**31-1)
+        
+        super().__init__(iter_idx, profiles_in, batch_size, training, nan_val)
                 
         
     def make_iterator(self):
@@ -258,14 +256,15 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
         i = 0
             
         seed(self.ran_seed) # Each epoch to have same randomm masking 
-        
+	
         while i < t:
             i_next = i + b # Start of next batch
             i_lim = min(i_next, t) # Limit of this batch useful data
             out_array_c.fill(0.0) # Mostly zeros in the end
             if self.training:
                 self._set_reference()
-            
+           
+              
             for batch_pos in range(b):
                 j = i + batch_pos # Global index within current batch
                  
