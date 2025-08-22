@@ -22,6 +22,8 @@ ac = AnsiColors()
 keras.utils.set_random_seed(int(time.time()))
 
 REPORT_INTERVAL = 0.5
+RECON_ACC_LIM = 0.05
+EPS = 1e-9
 
 # # # #  Custom losses and metrics  # # # #
 
@@ -40,7 +42,7 @@ def mix_acc_mask(y_true, y_pred, weights):
 
 def mae_acc(y_true, y_pred, weights):
     
-    is_close = ops.cast(ops.abs(y_true-y_pred) < 0.1, dtype='float32')
+    is_close = ops.cast(ops.abs(y_true-y_pred) < RECON_ACC_LIM, dtype='float32')
  
     return ops.mean(is_close)
 
@@ -54,9 +56,9 @@ def mae_mask(x_in, y_true, y_pred, weights):
     return ops.divide_no_nan(ops.sum(diff), ops.sum(masked * weights))
 
 
-def nonzero_mae_loss(x_in, y_true, y_pred, weights):
+def nonzero_mae_loss(y_true, y_pred, weights):
     
-    valid = ops.cast(x_in > 0.0, dtype='float32') # Not NaN
+    valid = ops.cast(y_true > 0.0, dtype='float32') # Not NaN
     
     diff = weights * ops.abs(y_true-y_pred)
 
@@ -74,15 +76,11 @@ def nonzero_mae(x_in, y_true, y_pred, weights):
 
 def neg_log_likelihood(y_true, y_pred, weights):
     
-    true_probs = y_true + 1e-9 # Prevent overflow from zeros
-    pred_probs = y_pred + 1e-9
+    true_probs = y_true + EPS # Prevent overflow from zeros
+    pred_probs = y_pred + EPS
     
     nll = true_probs * ops.log(pred_probs)
     nll = -ops.divide_no_nan(ops.sum(nll * weights), ops.sum(weights))    
-    
-    #distrib = tfp.distributions.Multinomial(2, probs=true_probs)    
-    #nll = distrib.log_prob(pred_probs) # Mixture proportions to counts
-    #nll = -ops.divide_no_nan(ops.sum(nll * weights), ops.sum(weights))
 
     return nll
 
@@ -180,18 +178,41 @@ def make_inference(model_path, profiles, replica_cols, klasses=None, batch_size=
 
     return out_array_c, out_array_r, latent_array
 
+"""
+class layers.Dense(tfp.layers.layers.Dense):
+    
+    def __init__(self, parent, ndim, name, activation='gelu'):
+        
+        super().__init__(ndim, name=name, activation=activation)
+        
+        self.parent = parent
+     
+
+    def call(self, x):
+        
+        y = super().call(x)
+	
+        self.parent.add_loss(self.losses)
+
+        return y
+
+
 
 class BayesInference(keras.Layer):
     
-    def __init__(self, ndim, name, activation='gelu', *args, **kw):
+    def __init__(self, ndim, name, activation='gelu'):
         
-        super().__init__(*args, **kw)
+        super().__init__()
         
-        self._tfp_layer = tfp.layers.DenseReparameterization(ndim, name=name, activation=activation)
-         
-    def call(self, x):
-        
-        return self._tfp_layer(x)
+        self.sub_layer = layers.Dense(self, ndim, name=name, activation=activation)
+ 	    
+
+    def call(self, x, training=None):
+
+        return self.sub_layer(x)
+"""
+
+from .dv import DenseReparameterization
 
 
 class CrossAttention(keras.Layer):
@@ -212,7 +233,6 @@ class CrossAttention(keras.Layer):
         self._add1 = layers.Add()
         self._add2 = layers.Add()
         
-         
     def call(self, query, key):
         
          x = self._mha(query, key, attention_mask=self._attention_mask, return_attention_scores=False)
@@ -228,12 +248,13 @@ def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noi
 
     n_ref, prof_dim =  data_generator.ref_profiles.shape[1:]
  
-    x_query_in = keras.Input(shape=(1, prof_dim), name='in_prof') # Queries, to augment. Sequence lengths is (1,) : batch will be (b, 1, p)
+    x_query_in = keras.Input(shape=(prof_dim,), name='in_prof') # Queries, to augment. Sequence lengths is (1,) : batch will be (b, 1, p)
     x_keys_in  = keras.Input(shape=(n_ref, prof_dim), name='in_ref')  # Keys, to comare to, invariant over epoch : batch will be (1, n, p)
 
     compress_layer = layers.Conv1D(ndim_compress, 1, name='compress', activation='gelu', padding='valid')
  
-    x1 = compress_layer(x_query_in)
+    x1 = layers.Reshape((1,prof_dim), name='in_seq')(x_query_in) # From profiles to unarary sequence of profiles
+    x1 = compress_layer(x1)
     x2 = compress_layer(x_keys_in)
  
     x1 = layers.GaussianNoise(noise_sigma, name=f'noise')(x1)
@@ -249,20 +270,20 @@ def get_model(data_generator, ndim_compress=10, nlayers_att=4, nheads_att=2, noi
 
     # Reconstruction
     
-    x1_recon = BayesInference(ndim_compress, name='bnn_expand1')(x1)
+    x1_recon = layers.Dense(ndim_compress, name='bnn_expand1', activation='gelu')(x1)
     x1_recon = layers.LayerNormalization()(x1_recon)
     
-    recon_out = BayesInference(prof_dim, name='recon_out', activation='softplus')(x1_recon)
+    recon_out = layers.Dense(prof_dim, name='recon_out', activation='sigmoid')(x1_recon)
 
     # Class mixtures
 
-    x1_class = BayesInference(ndim_compress, name='bnn_pred1', activation='gelu')(x1)
+    x1_class = layers.Dense(ndim_compress, name='bnn_pred1', activation='gelu')(x1)
     x1_class = layers.LayerNormalization()(x1_class)
     
-    x1_class = BayesInference(ndim_compress, name='bnn_pred2', activation='gelu')(x1_class)
+    x1_class = layers.Dense(ndim_compress, name='bnn_pred2', activation='gelu')(x1_class)
     x1_class = layers.LayerNormalization()(x1_class)
     
-    class_mix_out = BayesInference(n_classes, name='pred_out', activation='softmax')(x1_class)
+    class_mix_out = DenseReparameterization(n_classes, name='pred_out', activation='softmax')(x1_class)
  
     model = keras.Model([x_query_in, x_keys_in], [recon_out, latent, class_mix_out])
     
@@ -285,36 +306,35 @@ def train_model(model_path, test_idx, train_idx, profiles, class_labels, replica
     optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
     
     acc_funcs  = [mix_acc_mask, mae_acc, nonzero_mae, mae_mask]
-    loss_funcs = [neg_log_likelihood, nonzero_mae_loss]
    
     acc_metric_names  = ['acc_cat', 'acc_recon', 'mae_recon', 'mae_msk']
     loss_metric_names = ['loss_c','loss_r']
 
     loss_metrics, acc_metrics, report_line1, report_line2 = _init_metrics(loss_metric_names, acc_metric_names)    
     all_metrics = loss_metrics + acc_metrics
- 
-    @tf.function
+    
+
     def test_train_step(x_train, y_true, weights, training=True):
         x_in, x_ref = x_train
         y_true_c, y_true_r = y_true
-        loss_func_c, loss_func_r = loss_funcs
         loss_metric_c, loss_metric_r = loss_metrics
  
         if training:
             with tf.GradientTape() as tape:
-                y_pred_r, latent, y_pred_c = model(x_train)
-                loss_c = loss_func_c(y_true_c, y_pred_c, weights)
-                loss_r = loss_func_r(x_in, y_true_r, y_pred_r, weights)
-                loss = loss_c + loss_r
- 
+                y_pred_r, latent, y_pred_c = model(x_train, training=training)
+                loss_c = neg_log_likelihood(y_true_c, y_pred_c, weights)
+                loss_r = nonzero_mae_loss(y_true_r, y_pred_r, weights)
+                loss_m = ops.sum(model.losses)/data_generator._n_items
+                loss = loss_c + loss_r + loss_m
+            
             grads = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(grads, model.trainable_variables))
  
         else:
-            y_pred_r, latent, y_pred_c = model(x_train)
-            loss_c = loss_func_c(y_true_c, y_pred_c, weights)
-            loss_r = loss_func_r(x_in, y_true_r, y_pred_r, weights)
-            loss =  loss_c + loss_r
+            y_pred_r, latent, y_pred_c = model(x_train, training=training)
+            loss_c = neg_log_likelihood(y_true_c, y_pred_c, weights)
+            loss_r = nonzero_mae_loss(y_true_r, y_pred_r, weights)
+            loss = loss_c + loss_r 
  
         j = 0 if training else 1 # training, test
         loss_metric_c[j](loss_c)
@@ -325,7 +345,7 @@ def train_model(model_path, test_idx, train_idx, profiles, class_labels, replica
                 acc_metric[j](acc_func(y_true_c, y_pred_c, weights))
             else:
                 acc_metric[j](acc_func(x_in, y_true_r, y_pred_r, weights))
-    
+
     mean_dt = 0
     history = defaultdict(list)
 
@@ -348,7 +368,7 @@ def train_model(model_path, test_idx, train_idx, profiles, class_labels, replica
                       
             ref_input = data_generator.ref_profiles
             test_train_step([x_train, ref_input], y_true, weights)
- 
+  
             n_steps += 1.0
             batch_end = time.time()
  

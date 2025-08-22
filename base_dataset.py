@@ -335,30 +335,44 @@ class BaseDataSet:
         return up_dict
 
 
-    def normalize_profiles(self, label, col_norm=False):
+    def normalize_profiles_max(self, key, col_norm=False, eps=1e-5):
      
-        profile_data = self.get_profile_data(label)
-        #nan_mask = np.isnan(profile_data)
-        
+        profile_data = self.get_profile_data(key)
+
         n, m = profile_data.shape
  
         if col_norm:
             for k in range(m):
                 col = profile_data[:,k]
                 profile_data[:,k] /= np.median(col[col > 0])
-
-        #div = np.nanmax(profile_data, axis=1) - np.nanmin(profile_data, axis=1)
-        #nz = div != 0.0
-        #profile_data[nz] /= div[nz,None]
         
+        mn = np.nanmax(profile_data, axis=1)
+        profile_data -= mn[:,None]
+        profile_data += eps
+         
         mx = np.nanmax(profile_data, axis=1)
-        div = mx - np.nanmin(profile_data, axis=1)
-        nz = div != 0.0
+        nz = mx != 0.0
         profile_data[nz] /= mx[nz,None]
-        
-        self.set_profile_data(label, profile_data)
+
+        self.set_profile_data(key, profile_data)
      
-    
+     
+    def normalize_profiles_rms(self, key=None, scale=0.25):
+        
+        if not key:
+           key = self.train_profile_key
+        
+        profile_data = self.get_profile_data(key)
+        p2 = profile_data * profile_data
+        
+        msq = np.nanmean(p2, axis=1)
+        nz = msq != 0.0
+        p2[nz] /= msq[nz,None]
+        profile_data = scale * np.sqrt(p2)
+        
+        self.set_profile_data(key, profile_data)
+
+        
     def update_protein_ids(self):
         
         self._get_uniprot_cache(redo=True)
@@ -437,6 +451,21 @@ class BaseDataSet:
         
 
     @property
+    def array_keys(self):
+        
+        self._check_pids('fetch array list')
+        array_keys = []
+        save_dict = self._get_save_dict()
+        
+        for key in save_dict:
+            if key.startswith(ARRAY_VALUES_TAG):
+                label = key[len(ARRAY_VALUES_TAG):]
+                array_keys.append(label)
+        
+        return array_keys
+
+
+    @property
     def pred_classes_labels(self):
         
         self._check_pids('fetch predicted classes list')
@@ -459,6 +488,16 @@ class BaseDataSet:
         return key in save_dict
     
     
+    def has_profile_key(self, label):
+        
+        return self._have_label(PROFILE_TAG, label)
+
+    
+    def has_array_key(self, label):
+        
+        return self._have_label(ARRAY_VALUES_TAG, label)
+
+
     def has_marker_key(self, label):
         
         return self._have_label(MARKER_CLASSES_TAG, label)
@@ -469,7 +508,15 @@ class BaseDataSet:
         return self._have_label(PRED_CLASSES_TAG, label)
 
 
-    def _check_marker_label(self, label):
+    def _check_array_key(self, label):
+        
+        if not self.has_array_key(label):
+            avail = ', '.join(self.array_keys)
+            msg = f'Array values "{label}" not in array list. Available: {avail}'
+            raise SchisomeException(msg)
+            
+
+    def _check_marker_key(self, label):
         
         if not self.has_marker_key(label):
             avail = ', '.join(self.marker_keys)
@@ -491,7 +538,7 @@ class BaseDataSet:
     def get_marker_data(self, label):
     
         self._check_pids('fetch markers')
-        self._check_marker_label(label)
+        self._check_marker_key(label)
         
         save_dict = self._get_save_dict()
         return save_dict[MARKER_CLASSES_TAG + label]
@@ -500,7 +547,7 @@ class BaseDataSet:
     def get_marker_labels(self, label):
         
         self._check_pids('fetch marker classes')
-        self._check_marker_label(label)
+        self._check_marker_key(label)
 
         save_dict = self._get_save_dict()
         return [str(x) for x in save_dict[MARKER_LABELS_TAG + label]]
@@ -791,7 +838,7 @@ class BaseDataSet:
     def get_array_data(self, label):
     
         self._check_pids('fetch array data')
-        self._check_marker_label(label)
+        self._check_array_key(label)
         
         save_dict = self._get_save_dict()
         return save_dict[ARRAY_VALUES_TAG + label]
@@ -865,14 +912,9 @@ class BaseDataSet:
                 self._delete_save_data(key)
         
 
-    def have_profile_label(self, label):
-        
-        return self._have_label(PROFILE_TAG, label)
-
-
     def _check_profile_label(self, label):
     
-        if not self.have_profile_label(label):
+        if not self.has_profile_key(label):
             avail = ', '.join(self.profile_keys)
             msg = f'Profile set "{label}" not in profiles list. Available: {avail}'
             raise SchisomeException(msg)

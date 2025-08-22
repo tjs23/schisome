@@ -139,7 +139,7 @@ DB_ORGANELLE_INFO = {'CEC':              ('Cytosol-ECM cluster','#FFEEDD'), # Cy
                      'PMS':              ('PM sub-cluster','#40FFFF'), # PM sub pop
                      'RIBOSOMAL':        ('Ribosome','#7020FF'),
                      'TGN':              ('trans Golgi network','#B080FF'),
-	                 'UNKNOWN':          ('Unkown/unclassified','#404040'),
+	             'UNKNOWN':          ('Unkown/unclassified','#404040'),
                      'VACUOLE':          ('Vacuole','#00A000'),
                      'RIBOSOME 40S':     ('Ribosome 40S subunit', '#000080'),
                      'RIBOSOME 60S':     ('Ribosome 60S subunit', '#800000'),

@@ -5,9 +5,11 @@ run_tag = 'Aug25v1'
 data_paths = glob.glob(f'datasets/*_{run_tag}.npz')
 umap_titles = ['Input', 'Zero-filled', 'Latent']
 
+if not os.path.exists('plots'):
+    os.mkdir('plots')
+
 for data_path in data_paths:
   
-  # # # # # # # # 
   
   data_set = SchisomeDataSet(data_path)  
  
@@ -16,6 +18,10 @@ for data_path in data_paths:
   latent_key = data_set.latent_profile_key
   zfill_key = data_set.zfill_profile_key
   train_key = data_set.train_profile_key
+  
+  # # # # # # # # 
+
+  data_set.plot_reconstruction() 
   
   data_set.save_pruned_table(tsv_path=f'{tag}_pruned_list.tsv')
  
@@ -29,7 +35,7 @@ for data_path in data_paths:
                         title=f'UMAP Zero-reconstructed p-value',
                         save_path=f'plots/{tag}_pvalue.png')
 
-  data_set.plot_umap_2d([zfill_key], 'dual', ['Zero-reconstructed'],
+  data_set.plot_umap_2d([zfill_key], 'duality', ['Zero-reconstructed'],
                         title=f'UMAP Zero-reconstructed duality',
                         save_path=f'plots/{tag}_duality.png')
 
@@ -37,21 +43,21 @@ for data_path in data_paths:
                         title=f'UMAP Original zero-content',
                         save_path=f'plots/{tag}_zerocount.png')
 
-  data_set.plot_umap_2d(train_key, ['pruned_organelle','training'], ['Removed','Retained'],
+  data_set.plot_umap_2d([train_key], ['pruned_organelle','training'], ['Removed','Retained'],
                         title=f'UMAP Training Marker Cull',
                         save_path=f'plots/{tag}_marker_prune.png')
                         
   umap_prof_keys = [train_key, zfill_key, latent_key]
   
-  for marker_key in (data_set.train_markers_key, 'predictions', data_set.aux_markers_key):
-      data_set.plot_umap_2d(umap_prof_keys, marker_key, umap_titles,
+  for marker_key in (data_set.train_markers_key, 'prediction', data_set.aux_markers_key):
+      data_set.plot_umap_2d(umap_prof_keys, [marker_key], umap_titles,
                             title=f'UMAP {tag} {marker_key} classes',
                             save_path=f'plots/{tag}_{marker_key}.png')
 
   for prof_key in umap_prof_keys:
       data_set.plot_dual_proj_2d(prof_key, title=f'UMAP {prof_key} {tag} : Dual localisation',
                                  save_path=f'plots/{tag}_dual_loc_{prof_key}_{{}}.png')
- 
+
   data_set.plot_contingency_table(data_set.train_markers_key,
                                   save_path=f'plots/{tag}_confusion_matrix_train.pdf',
                                   marker_title=f'{tag} : Train Class')
@@ -80,7 +86,7 @@ for data_path in data_paths:
       data_set.plot_mixed_ave_profiles('CYTOSOL', 'NUCLEUS', save_paths=save_paths)
 
   if tag.startswith('Mouse'):
-      data_set.plot_prediction_scatter(save_paths='plots/{tag}_DNNscorescatter_TAGEMexemplar.pdf',
+      data_set.plot_prediction_scatter(save_paths=f'plots/{tag}_DNNscorescatter_TAGEMexemplar.pdf',
                                        protein_ids=['G5E870','Q924C1','Q9WUA2','Q8VDR9'])
      
 

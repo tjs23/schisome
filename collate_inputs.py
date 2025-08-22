@@ -4,9 +4,8 @@
 #   Add marker lists for each dataset
 #   Prune markler list to make training sets
 
-# NOTE Human U2OS data is already normalised in the TSV file
-
 import os
+from glob import glob
 from schisome import SchisomeDataSet
 
 if not os.path.exists('datasets'):
@@ -22,13 +21,7 @@ plot_args = dict(min_nonzero=0.9, spot_size=16)
 
 source_tag = 'Arabidopsis_PCSC'
 
-profile_paths = ['profiles/Arabidposis_PCSC_R0.tsv',
-                 'profiles/Arabidposis_PCSC_R1.tsv',
-                 'profiles/Arabidposis_PCSC_R2.tsv',
-                 'profiles/Arabidposis_PCSC_R3.tsv',
-                 'profiles/Arabidposis_PCSC_R4.tsv',
-                 'profiles/Arabidposis_PCSC_R5.tsv',
-                 'profiles/Arabidposis_PCSC_R6.tsv']
+profile_paths = glob('profiles/Arabidposis_PCSC_R?.tsv')
 
 data_path = f'datasets/{source_tag}_{run_tag}.npz'
 
@@ -37,10 +30,10 @@ at_dataset.add_raw_profiles(profile_paths)
 at_dataset.add_markers('organelle', 'markers/Arabidopsis_organelle_Feb23.csv')
 at_dataset.add_markers('suborganelle', 'markers/Arabidopsis_suborganelle_Feb23.csv')
 
-at_dataset.normalize_profiles('init', col_norm=False)
+at_dataset.normalize_profiles_max('init')
 at_dataset.prune_markers('organelle', 'training')
 
-at_dataset.plot_umap_2d('init', ['organelle', 'training'], ['Organelle markers', 'Training'], **plot_args)
+#at_dataset.plot_umap_2d('init', ['organelle', 'training'], ['Organelle markers', 'Training'], **plot_args)
 
 
 # # # # # # # # # # # # # # # # # # # # 
@@ -56,6 +49,7 @@ data_path = f'datasets/{source_tag}_{run_tag}.npz'
 
 hs_dataset = SchisomeDataSet(data_path, source_tag, aux_marker_key='uniprot')
 hs_dataset.add_raw_profiles(profile_paths)
+hs_dataset.normalize_profiles_max('init')
 
 hs_dataset.add_markers('organelle', 'markers/Human_U2OS_markers_nocplx.csv')
 
@@ -67,7 +61,7 @@ else:
 
 hs_dataset.prune_markers('organelle', 'training')  
 
-hs_dataset.plot_umap_2d('init', ['organelle', 'uniprot', 'training'], ['SVM markers', 'UniProt', 'Training'], **plot_args)
+#hs_dataset.plot_umap_2d('init', ['organelle', 'uniprot', 'training'], ['SVM markers', 'UniProt', 'Training'], **plot_args)
 
 # UniProt derived markers
 
@@ -75,12 +69,13 @@ data_path2 = f'datasets/{source_tag}_UniProt_{run_tag}.npz'
 
 hs_dataset2 = SchisomeDataSet(data_path2, source_tag, aux_marker_key='svn_in')
 hs_dataset2.add_raw_profiles(profile_paths)
+hs_dataset2.normalize_profiles_max('init')
 
 hs_dataset2.add_markers('organelle', 'markers/Human_UniProt_all.csv')
 hs_dataset2.add_markers('svn_in',    'markers/Human_U2OS_markers_nocplx.csv')
 hs_dataset2.prune_markers('organelle', 'training', sparse_classes=['ENDOSOME'])  
 
-hs_dataset2.plot_umap_2d('init', ['organelle', 'svn_in', 'training'], ['UniProt', 'SVM markers', 'Training'], **plot_args)
+#hs_dataset2.plot_umap_2d('init', ['organelle', 'svn_in', 'training'], ['UniProt', 'SVM markers', 'Training'], **plot_args)
 
 
 # # # # # # # # # # # # # # # # # # # # 
@@ -97,7 +92,7 @@ data_path = f'datasets/{source_tag}_{run_tag}.npz'
 
 mm_dataset = SchisomeDataSet(data_path, source_tag, aux_marker_key='TAGM_good')
 mm_dataset.add_raw_profiles(profile_paths)
-mm_dataset.normalize_profiles('init', col_norm=False)
+mm_dataset.normalize_profiles_max('init')
  
 mm_dataset.add_markers('organelle',  'markers/Mouse_E14_markers.csv')
 mm_dataset.add_markers('TAGM_good',  'markers/Mouse_E14_TAGMgood.csv')
@@ -110,7 +105,7 @@ if not os.path.exists('markers/Mouse_UniProt_all.csv'):
 else:
     mm_dataset.add_markers('uniprot',   'markers/Mouse_UniProt_all.csv')
 
-mm_dataset.plot_umap_2d('init', ['organelle', 'TAGM_good', 'training'], ['TAGM markers', 'TAGM good', 'Training'], **plot_args)
+#mm_dataset.plot_umap_2d('init', ['organelle', 'TAGM_good', 'training'], ['TAGM markers', 'TAGM good', 'Training'], **plot_args)
 
 # UniProt derived markers
 
@@ -118,10 +113,10 @@ data_path2 = f'datasets/{source_tag}_UniProt_{run_tag}.npz'
 
 mm_dataset2 = SchisomeDataSet(data_path2, source_tag, aux_marker_key='TAGM_good')
 mm_dataset2.add_raw_profiles(profile_paths)
-mm_dataset2.normalize_profiles('init', col_norm=False)
+mm_dataset2.normalize_profiles_max('init')
 
 mm_dataset2.add_markers('organelle',  'markers/Mouse_UniProt_all.csv')
 mm_dataset2.add_markers('TAGM_good',  'markers/Mouse_E14_TAGMgood.csv')
 mm_dataset2.prune_markers('organelle', 'training')  
 
-mm_dataset2.plot_umap_2d('init', ['organelle', 'TAGM_good', 'training'], ['UniProt', 'TAGM good', 'Training'], **plot_args)
+#mm_dataset2.plot_umap_2d('init', ['organelle', 'TAGM_good', 'training'], ['UniProt', 'TAGM good', 'Training'], **plot_args)

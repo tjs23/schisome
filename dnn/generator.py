@@ -36,7 +36,7 @@ class BaseGenerator(keras.utils.Sequence): # Superclass
  
     def make_iterator(self):
  
-        return # Overwite in subclass
+        pass # Overwite in subclass
  
  
     def __len__(self):
@@ -114,14 +114,15 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
     
     def __init__(self, iter_idx, profiles_in, known_klasses, replica_cols, batch_size=32,
                  training=True, mask_min=0.05, mask_max=0.25, mask_val=0.0, rep_mask=0.25,
-                 n_mix=250, nan_val=0.0, max_null_corr=0.45):
+                 n_mix=250, nan_val=0.0, max_null_corr=0.5):
         
         max_class = known_klasses.max()
         max_class += 1
         
         if training:
             n_prof, n_cols = profiles_in.shape
-            n_null = 2 * n_mix # n_prof 
+            n_null = n_mix # 2 * n_mix # n_prof 
+            null_idx = np.arange(n_prof, n_prof+n_null)
             null_profs = np.zeros((n_null, n_cols))
             profiles_in = np.concatenate([profiles_in, null_profs]) # Outputs for nulls always nan so not trainable, inputs filled every batch
             known_klasses = np.concatenate([known_klasses, np.full(n_null, max_class)])
@@ -199,7 +200,9 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
                 ran_rows = ran_rows.ravel() # n_null * p
                 ran_cols = np.concatenate([np.arange(p) for i in range(n_replace)])
                 
-                profiles_in[null_idx,:] = profiles_in[ran_rows, ran_cols].reshape(n_replace, p)
+                ran_prof = profiles_in[ran_rows, ran_cols].reshape(n_replace, p)
+                ran_prof = np.clip(0.0, 1.0, ran_prof + np.random.normal(0.0, 0.05, (n_replace, p)))
+                profiles_in[null_idx,:] = ran_prof
                 corr_mat = 1.0 - distance.cdist(profiles_in[:n_orig], profiles_in[n_orig:], metric='correlation')
                 max_corrs = corr_mat.max(axis=0)
                 
@@ -248,7 +251,7 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
         
         t = len(pair_idx)
         
-        in_array = np.zeros((b, 1, p), np.float32) # masked profiles
+        in_array = np.zeros((b, p), np.float32) # masked profiles
         out_array_r = np.zeros((b, p), np.float32) # original profiles
         out_array_c = np.zeros((b, n_klass), np.float32) # subcell loc class, fractional prob encoding
         weights = np.empty((b, 1), np.float32) # Set to zero at batch end padding 
@@ -256,7 +259,7 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
         i = 0
             
         seed(self.ran_seed) # Each epoch to have same randomm masking 
-	
+        
         while i < t:
             i_next = i + b # Start of next batch
             i_lim = min(i_next, t) # Limit of this batch useful data
@@ -309,7 +312,7 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
                         self.ref_profiles[0,idx1,:] = row1 # Stop short-cut via reference
                         self.ref_profiles[0,idx2,:] = row2
                     
-                    in_array[batch_pos,0,:] = mix_row # Input maybe masked
+                    in_array[batch_pos,:] = mix_row # Input maybe masked
                     
                     if (klass1 >= 0) and (klass2 >= 0): # Both defined; these add to 1.0 if klass1 == klass2
                         out_array_c[batch_pos, klass1] += f
@@ -318,10 +321,11 @@ class MixedLocReconstructDataGenerator(BaseGenerator):
                     
                 else: # Last batch padding
                     weights[batch_pos,0] = 0.0
-                    in_array[batch_pos,0,:] = 0.0
+                    in_array[batch_pos,:] = 0.0
                     out_array_r[batch_pos,:] = 0.0
                             
             yield in_array, [out_array_c, out_array_r], weights
             
+	    
             i = i_next
 

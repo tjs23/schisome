@@ -1,7 +1,10 @@
-import os, sys, io, gzip
+import os, sys, io, gzip, multiprocessing
 import numpy as np
 from subprocess import Popen, PIPE
 from constants import READ_BUFFER, UNIPROT_URL, UNIPROT_ALT_ID_URL, AnsiColors
+
+MAX_CORES = multiprocessing.cpu_count()
+KEYBOARD_INTERRUPT_MSG = 'Parallel jobs stopped - KeyboardInterrupt'
 
 ac = AnsiColors()
 
@@ -66,7 +69,7 @@ def open_file(file_path, mode=None, gzip_exts=('.gz','.gzip'), buffer_size=READ_
         file_obj = io.TextIOWrapper(file_obj, encoding=encoding)
 
     else:
-        file_obj = open(file_path, mode or 'rU', buffer_size, encoding=encoding)
+        file_obj = open(file_path, mode or 'r', buffer_size, encoding=encoding)
 
     return file_obj
 
@@ -293,3 +296,109 @@ def get_color_array(colors):
     color_array = np.clip(color_array, 0.0, 1.0)
     
     return color_array
+
+
+
+def _parallel_job_wrapper(job, out_queue, target_func, data_item, args, kw):
+
+  try:
+    result = target_func(data_item, *args, **kw)
+    out_queue.put((job, result), False)
+ 
+  except KeyboardInterrupt as err: # Ignore in multiple sub-processes as this will be picked up only once later
+    return
+    
+
+def parallel_run(target_func, job_data, common_args=(), common_kw={},
+                 num_cpu=MAX_CORES, verbose=True, local_cpu_arg=None):
+  # This does not use Pool.apply_async because of its inability to pass
+  # pickled non-global functions
+  
+  from multiprocessing import Process, Manager
+  import gc, time, psutil
+
+  job_data = [x for x in job_data if x is not None]
+  num_jobs = len(job_data)
+  num_proc = min(num_cpu, num_jobs)
+  procs = {} # Current processes
+  queue = Manager().Queue() # Queue() # Collect output
+  results = [None] * num_jobs
+  gc.collect() # Mimimise mem footprint before fork
+  
+  if verbose:
+    msg = 'Running {} for {:,} tasks on {:,} cores'
+    info(msg.format(target_func.__name__, num_jobs, num_proc))
+  
+  k = 0
+  prev = 0.0
+  
+  for j in range(num_jobs):
+    
+    if len(procs) == num_proc: # Full
+      try:
+        i, result = queue.get()
+ 
+      except KeyboardInterrupt:
+        critical(KEYBOARD_INTERRUPT_MSG)
+
+      results[i] = result
+      del procs[i]
+      
+      if verbose:
+        k += 1
+        f = k / float(num_jobs)
+        
+        if (f-prev) > 1e-3: # Avoid very fine updates
+          info(f' .. {k:,}/{num_jobs:,} : {100.0*f:.2f}%', end='\r')
+          prev = f
+    
+    if local_cpu_arg and (j >= num_proc): # After initial allocations
+      arg, default = local_cpu_arg
+      cpu_free = 1.0 - (psutil.cpu_percent()*0.01)
+      kw_args = dict(common_kw)
+      kw_args[arg] = max(default, int(cpu_free*num_proc*0.5))
+    else:
+      kw_args = common_kw
+        
+    args = (j, queue, target_func, job_data[j], common_args, kw_args)
+    proc = Process(target=_parallel_job_wrapper, args=args)
+    procs[j] = proc
+
+    try:
+      proc.start()
+    
+    except IOError:
+      time.sleep(0.01)
+      proc.start()
+
+    except KeyboardInterrupt:
+      critical(KEYBOARD_INTERRUPT_MSG)
+      
+    except Exception as err:
+      raise(err)
+      
+  # Last waits
+  
+  while procs:
+    try:
+      i, result = queue.get()
+      
+    except KeyboardInterrupt:
+      critical(KEYBOARD_INTERRUPT_MSG)
+    
+    results[i] = result
+    del procs[i]
+   
+    if verbose:
+      k += 1
+      f = k / float(num_jobs)
+      info(f' .. {k:,}/{num_jobs:,} : {100.0*f:.2f}%', end='\r')
+ 
+  if verbose:
+    info(f' .. {k:,}/{num_jobs:,} : {100.0*f:.2f}%')
+    info('Done')
+ 
+  #queue.close()
+ 
+  return results
+

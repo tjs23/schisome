@@ -11,7 +11,7 @@ from scipy import stats
 from constants import COLOR_DICT, DB_ORGANELLE_CONV_DICT, DB_ORGANELLE_INFO
 from sql_schema import DB_SCHEME
 from base_dataset import BaseDataSet, SchisomeException
-
+from general_util import parallel_run, MAX_CORES
 
 class SchisomeDataSet(BaseDataSet):
     """
@@ -27,7 +27,7 @@ class SchisomeDataSet(BaseDataSet):
             
         else:
             save_dict = self._get_save_dict()
-            source_tag = save_dict.get('source_tag')
+            source_tag = str(save_dict.get('source_tag'))
 
         if not source_tag:
             msg = 'File for dataset does not contain "source_tag" and none was specified'
@@ -45,7 +45,10 @@ class SchisomeDataSet(BaseDataSet):
 
         if isinstance(class_labels, str):
             class_labels = [class_labels]
-     
+
+        if isinstance(proj_methods, str):
+            proj_methods = [proj_methods]
+        
         n_proj = max(len(proj_methods), len(class_labels), len(profile_labels))
 
         if len(proj_methods) < n_proj:
@@ -72,11 +75,13 @@ class SchisomeDataSet(BaseDataSet):
         
         marker_labels = self.marker_keys
         for class_label in class_labels:
-            if class_label in marker_labels:
-                self._check_marker_label(class_label)
+            if self.has_array_key(class_label) or self.has_marker_key(class_label) or self.has_pred_class_key(class_label):
+                continue
             
             else:
-                self._check_pred_class_key(class_label)
+                avail = ', '.join(self.array_keys + self.marker_keys + self.pred_classes_labels)
+                msg = f'Data track label "{class_label}" not known in data set. Available: {avail}'
+                raise SchisomeException(msg)
         
         self.plot_proj_2d(profile_labels, class_labels, proj_methods, titles,
                           title=title, min_nonzero=min_nonzero, save_file=save_path,
@@ -89,7 +94,7 @@ class SchisomeDataSet(BaseDataSet):
         profile_data = self.get_profile_data(profile_label)
         profile_data = np.nan_to_num(profile_data)
  
-        if class_label in self.pred_classes_labels:
+        if self.has_pred_class_key(class_label):
             score_array = self.get_pred_class_data(class_label)
             sort_scores = np.sort(score_array, axis=-1)
             invalid = (sort_scores[:,-1] - sort_scores[:,-2]) < 0.5
@@ -103,12 +108,24 @@ class SchisomeDataSet(BaseDataSet):
                 class_array[duals] = class_array.max() + 1
                 class_labels.append('DUAL')
  
-        else:
+        elif self.has_array_key(class_label):
+            vals = self.get_array_data(class_label)
+            vmin = vals.min()
+            vmax = vals.max()
+            scale = np.arange(vmin, vmax, 11)
+            class_array = np.searchsorted(scale, vals)
+            class_labels = [f'{x}' for x in scale[1:]]
+        
+        elif self.has_marker_key(class_label):
             class_array = self.get_marker_data(class_label)
             class_labels = self.get_marker_labels(class_label)
             class_array[class_array < 0] = len(class_labels)
             class_labels = class_labels + ['unknown']
             class_array[class_array >= len(class_labels)] = 0
+        
+        else:
+            msg = f'Data track "{class_label}" not known in data set.'
+            raise SchisomeException(msg)
  
         n, m = profile_data.shape
         valid = self.get_valid_mask(min_nonzero)
@@ -265,11 +282,13 @@ class SchisomeDataSet(BaseDataSet):
             k2 = known[i]
             if k2 >= 0:
                 out_map[k1, k2] += 1
- 
-        self.info(out_map) # Check pred classes match marker indices
+                
+        # Check pred classes match marker indices
+        for line in str(out_map).split('\n'):
+            self.info(line)
     
     
-    def make_class_predictions(self, fit=True, fit_distrib_points=200, rv=stats.beta, single_thresh=0.8):
+    def make_pvalues(self, fit=True, fit_distrib_points=200, rv=stats.beta, single_thresh=0.8, p_lim=1e-3):
         
         def _ensemble_survival(rv, sample_values, distrib_points, group_step=100):
  
@@ -301,7 +320,7 @@ class SchisomeDataSet(BaseDataSet):
  
             n = sample_values.shape[0]
             b = distrib_points[1]
-            spike =    1.0/b
+            spike = 1.0/b
             pdfs = []
             
             for a in range(0, n, group_step):
@@ -316,49 +335,41 @@ class SchisomeDataSet(BaseDataSet):
                         params = rv.fit(vals, floc=0.0, fscale=1.0)
                         pdf = rv.pdf(distrib_points, *params)
  
+                        if np.isinf(pdf[0]):
+                            pdf = np.zeros(distrib_points.shape)
+                            pdf[0] = spike
+                            
                     except Exception as err:
                         pdf = np.zeros(distrib_points.shape)
                         pdf[0] = spike
                 
                 if not pdf.max():
                     pdf[0] = spike
+                
                      
                 pdfs.append(pdf)
-            
+                           
             return pdfs
 
         self.info(f'Setting predictions, fitting p-values etc.')
         
-        klass_labels = self.train_labels
-        pred_class_scores = self.class_ensemble_preds
-        
-        n, m, nk = pred_class_scores.shape
- 
+        pred_class_scores = self.class_ensemble_preds        
+        n, m, nk = pred_class_scores.shape 
         distrib_points = np.linspace(0.0, 1.0, fit_distrib_points)
- 
-        p_values1 = np.zeros(n) # p-value for a single prediction
-        p_values2 = np.zeros(n) # p-value for a double prediction 
-        singularity = np.zeros(n) # singleness scores
-        duality = np.zeros(n) # dualness scores
-
-        prediction = np.full(n, -1)
-        prediction2 = np.full(n, -1)
-
-        for i in range(n):
-            prot_scores = pred_class_scores[i]
+        
+        def _calc_p_pred(prot_scores, distrib_points, nk, rv, fit):
             mean_scores = prot_scores.mean(axis=0)
             best_first = mean_scores.argsort()[::-1]
  
             # Single, dual
- 
-            k1, k2 = best_first[:2]
+            k1, k2, k3 = best_first[:3]
             mv1 = mean_scores[k1]
             mv2 = mean_scores[k2]
             
             pdfs = np.array([np.array(_ensemble_pdfs(rv, prot_scores[:,j], distrib_points)) for j in range(nk)])
             t = int(mv1*fit_distrib_points) # threshold index
             t2 = int((mv1+mv2)*fit_distrib_points)
-            
+
             # k x m x p -> k x p
             pdfs = pdfs.mean(axis=1) # Mean over models
             div = pdfs.sum(axis=1)[:,None]
@@ -370,7 +381,6 @@ class SchisomeDataSet(BaseDataSet):
  
             p1 = sfs[:,t] 
             p1 /= p1.sum() or 1.0
-            #p = np.array(p1)
             p1[k1] = 0.0
             
             p2 = sfs[:,t2] 
@@ -378,46 +388,111 @@ class SchisomeDataSet(BaseDataSet):
             p2[k1] = 0.0
             p2[k2] = 0.0
 
-            p_values1[i] = max(0.0, p1.sum()) # Single # can be < 0.0 due to float error
-            p_values2[i] = max(0.0, p2.sum()) # Dual            
+            p1 = max(0.0, p1.sum()) # Single # can be < 0.0 due to float error
+            p2 = max(0.0, p2.sum()) # Dual            
             
             if fit:
-                singularity[i] = _ensemble_survival(rv, prot_scores[:,k1], distrib_points)[int(single_thresh*fit_distrib_points)]
-                duality[i] = _ensemble_survival(rv, prot_scores[:,(k1, k2)].sum(axis=1), distrib_points)[int(single_thresh*fit_distrib_points)]
+                sing = _ensemble_survival(rv, prot_scores[:,k1], distrib_points)[int(single_thresh*fit_distrib_points)]
+                dual = _ensemble_survival(rv, prot_scores[:,(k1, k2)].sum(axis=1), distrib_points)[int(single_thresh*fit_distrib_points)]
             else:
-                singularity[i] = np.count_nonzero(prot_scores[:,k1] > single_thresh)/m
-                duality[i] = np.count_nonzero(prot_scores[:,(k1, k2)].sum(axis=1) > single_thresh)/m
- 
-            if singularity[i] > 0.5 and mean_scores[k1] > single_thresh:
-                prediction[i] = k1
- 
-            elif duality[i] > 0.5:
-                prediction[i] = k1
-                prediction2[i] = k2
+                sing = np.count_nonzero(prot_scores[:,k1] > single_thresh)/m
+                dual = np.count_nonzero(prot_scores[:,(k1, k2)].sum(axis=1) > single_thresh)/m
+            
+            return (p1, p2, sing, dual)
+            
+        results = parallel_run(_calc_p_pred, pred_class_scores,
+                               common_args=(distrib_points, nk, rv, fit), common_kw={},
+                               num_cpu=MAX_CORES, verbose=True, local_cpu_arg=None)
+                                
+        p_values1, p_values2, singularity, duality = [np.array(x) for x in zip(*results)]    
+                                
+        """
+        # For illustrating the process            
+        for i in range(n):
+                            fig, (ax1, ax2) = plt.subplots(1, 2)
+            
+            ax1.set_title(f'{self.proteins[i]}')
+            ax1.plot(distrib_points, pdfs[k1], label=klass_labels[k1], color=COLOR_DICT[klass_labels[k1]])
+            ax1.plot(distrib_points, pdfs[k2], label=klass_labels[k2], color=COLOR_DICT[klass_labels[k2]])
+            ax1.plot(distrib_points, pdfs[k3], label=klass_labels[k3], color=COLOR_DICT[klass_labels[k3]])
+            ax1.set_xlabel('DNN score')
+            ax1.set_ylabel('Probability density')
+            ax1.legend()
+            
+            ax2.set_title(f'{self.proteins[i]}')
+            ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k1], distrib_points), label=klass_labels[k1], color=COLOR_DICT[klass_labels[k1]])
+            ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k2], distrib_points), label=klass_labels[k2], color=COLOR_DICT[klass_labels[k2]])
+            ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k3], distrib_points), label=klass_labels[k3], color=COLOR_DICT[klass_labels[k3]])
+            ax2.set_xlabel('DNN score')
+            ax2.set_ylabel('Survival')
+            ax2.legend()
+            
+            plt.show()
 
-            if i % 100 == 0:
+            if i % 100 == 0:           
                 self.info(f'{i:,} {n:,}', end='\r')
- 
-        is_single = singularity > 0.1
-        p_values = p_values2.copy()
-        p_values[is_single] = p_values1[is_single]
-        
-        init_profiles = self.train_profiles
-        completeness = np.count_nonzero(np.nan_to_num(init_profiles), axis=1)/float(init_profiles.shape[1])
-        novelty = completeness * p_values
+        """
+
+        is_dbl = (p_values1 > p_lim) & (p_values2 <= p_lim)
+        p_values = p_values1.copy()
+        p_values[is_dbl] = p_values2[is_dbl]
         
         self.set_array_data('pval', p_values)
         self.set_array_data('pval1', p_values1)
         self.set_array_data('pval2', p_values2)
         
-        self.set_array_data('novelty', novelty)
-        self.set_array_data('completeness', completeness)
         self.set_array_data('singularity', singularity)
         self.set_array_data('duality', duality)
 
+   
+    def make_class_predictions(self, p_lim=1e-3):
+ 
+        if not self.has_array_key('pval'):
+            self.warn(f'No p-values present for dataset; calculate these first')
+            return
+        
+        p_values1 = self.get_array_data('pval1')
+        p_values2 = self.get_array_data('pval2')
+        pred_class_scores = self.class_ensemble_preds
+        mean_scores = pred_class_scores.mean(axis=1)
+        
+        prediction = np.full(p_values1.shape, -1)
+        prediction2 = np.full(p_values1.shape, -1)
+        
+        for i, scores in enumerate(mean_scores):
+            best_first = scores.argsort()[::-1]
+            k1, k2, k3 = best_first[:3]
+            mv1 = scores[k1]
+            mv2 = scores[k2]
+            p1 = p_values1[i]
+            p2 = p_values2[i]
+            
+            if (p1 < p_lim) and (mv1 > 0.8): #  or mv1 > 0.5:
+                pred1 = k1
+                pred2 = -1
+ 
+            elif p2 < p_lim:
+                pred1 = k1
+                pred2 = k2
+            
+            else:
+                pred1 = -1
+                pred2 = -1
+                
+            prediction[i] = pred1
+            prediction2[i] = pred2
+            
+        klass_labels = self.train_labels + ['UNKNOWN']
+        init_profiles = self.train_profiles
+        
+        completeness = np.count_nonzero(np.nan_to_num(init_profiles), axis=1)/float(init_profiles.shape[1])
+        novelty = completeness * p_values1
+        
+        self.set_array_data('novelty', novelty)
+        self.set_array_data('completeness', completeness)
         self.set_marker_data('prediction2', prediction2, klass_labels)
         self.set_marker_data('prediction', prediction, klass_labels)
-        
+
 
     def make_profile_predictions(self, split_idx=None, max_missing=0.35):
 
@@ -428,7 +503,7 @@ class SchisomeDataSet(BaseDataSet):
         n, m = init_profiles.shape
         
         recon_label = self.recon_profile_key
-        if not self.have_profile_label(recon_label):
+        if not self.has_profile_key(recon_label):
             self.warn(f'Cannot find inference/predictions {recon_label}')
             return
  
@@ -437,17 +512,15 @@ class SchisomeDataSet(BaseDataSet):
             for label, start, end in split_idx:
                 self.set_profile_data(f'init_{label}', init_profiles[:,start:end])
  
-        # Output data, maximal, unfiltered
+        # Output data, unfiltered
+        # Recon profile is median, latent is mean
         msg = 'Loading inference scores'
         self.info(msg)
         recon_profiles = self.recon_profiles
         latent_profiles = self.latent_profiles
         pred_score_ensemble = self.class_ensemble_preds  
         
-        # Recon profile is median
-        recon_profiles = np.median(recon_profiles, axis=1)
-        latent_profiles = np.mean(latent_profiles, axis=1)
-        
+                
         # Average class assignments
         mean_klass_scores = pred_score_ensemble.mean(axis=1)
  
@@ -458,7 +531,7 @@ class SchisomeDataSet(BaseDataSet):
         # Confusion matrix, for sanity check 
         self._print_confusion_matrix(train_klasses, best_klass_idx)
  
-        pred_klass_labels = self.get_marker_labels('predictions')
+        pred_klass_labels = self.get_marker_labels('prediction')
         
         if pred_klass_labels != klass_labels:
             self.info(f'Re-indexing class labels to match predictions')
@@ -506,7 +579,7 @@ class SchisomeDataSet(BaseDataSet):
         # Missing reconstruction
         for maxnan in (10,20,30,40,50):
             invalid = np.count_nonzero(np.isnan(init_profiles), axis=-1) > maxnan
-            new_profiles =    np.array(zfill_profiles)
+            new_profiles = np.array(zfill_profiles)
             new_profiles[invalid,:] = 0.0
             self.set_profile_data(f'zfill_maxnan{maxnan}', new_profiles)
  
@@ -514,7 +587,7 @@ class SchisomeDataSet(BaseDataSet):
         # Set a limit to how many values can be reconstructed
         # this is a bit conservative
         invalid = np.count_nonzero(np.isnan(init_profiles), axis=-1) > int(max_missing*m) # E.g. one third
-        new_profiles =    np.array(zfill_profiles)
+        new_profiles = np.array(zfill_profiles)
         new_profiles[invalid,:] = 0.0
         self.set_profile_data(self.zfill_profile_key, new_profiles)
  
@@ -525,15 +598,15 @@ class SchisomeDataSet(BaseDataSet):
         # Reconstruction, conservative
         msg = 'Getting conservative reconstruction'
         self.info(msg)
-        new_profiles =    np.array(recon_profiles)
+        new_profiles = np.array(recon_profiles)
         new_profiles[invalid,:] = 0.0
-        self.set_profile_data(self.recon_profile_key, new_profiles)
+        self.set_profile_data('recon_valid', new_profiles)
  
         # Latent map, conservative
         msg = 'Getting conservative latent map'
         self.info(msg)
         latent_profiles[invalid,:] = 0.0
-        self.set_profile_data(self.latent_profile_key, latent_profiles)
+        self.set_profile_data('latent_valid', latent_profiles)
     
     
     def reconstruction_overview(self, tag, max_missing=0.35):    
@@ -753,8 +826,8 @@ class SchisomeDataSet(BaseDataSet):
         
         n, m, k = pred_data.shape
 
-        pvals = self.get_array_data('pvals')
-        pvals1 = self.get_array_data('pvals1')
+        pvals = self.get_array_data('pval')
+        pvals1 = self.get_array_data('pval1')
         completeness = self.get_array_data('completeness')
         
         incomplete = completeness < min_nonzero
@@ -881,7 +954,7 @@ class SchisomeDataSet(BaseDataSet):
         
         n, m, k = pred_data.shape
  
-        pvals = self.get_array_data('pvals')
+        pvals = self.get_array_data('pval')
         completeness = self.get_array_data('completeness')
         complete = completeness >= min_nonzero
         untrained = klass_idx < 0
@@ -1114,8 +1187,10 @@ class SchisomeDataSet(BaseDataSet):
             ax.scatter([recall_05], [precision_05], s=40, color=color, marker='*', zorder=9)
             ax.scatter([recall_05], [precision_05], s=5, color='k', marker='*', zorder=90)
 
-        ax.set_xlim(0.65, 1.02)
-        ax.set_ylim(0.65, 1.02)
+        #ax.set_xlim(0.65, 1.02)
+        #ax.set_ylim(0.65, 1.02)
+        ax.set_xlim(0.0, 1.02)
+        ax.set_ylim(0.0, 1.02)
         
         ax.legend(fontsize=8)
         
@@ -1134,8 +1209,7 @@ class SchisomeDataSet(BaseDataSet):
         cmap = LinearSegmentedColormap.from_list(name='CMAP01', colors=['#FFFFFF', '#4080FF'], N=25)
         cmap.set_bad('#DDDDCD', 1.0)
         
-        pred_labels = self.class_ensemble_preds
-        
+        pred_labels = self.train_labels
         marker_labels = self.get_marker_labels(marker_label)
         
         all_labels = set(pred_labels) & set(marker_labels) - set(['unknown','DUAL'])
@@ -1303,7 +1377,7 @@ class SchisomeDataSet(BaseDataSet):
 
     def plot_ave_profiles(self, marker_label, replica=0, save_paths='png/ave_profile_{}.png', min_nonzero=0.8):
         
-        self._check_marker_label(marker_label)
+        self._check_marker_key(marker_label)
 
         prof_data = self.train_profiles
  
@@ -1316,7 +1390,7 @@ class SchisomeDataSet(BaseDataSet):
  
         replica_widths = self.replica_cols
  
-        replica_starts = np.cumsum(replica_widths)
+        replica_starts = np.cumsum([0] + replica_widths)
         replica_ends = replica_starts + replica_widths
         replica_data = prof_data[valid,replica_starts[replica]:replica_ends[replica]]
  
@@ -1508,48 +1582,47 @@ class SchisomeDataSet(BaseDataSet):
                 plt.close(fig)
  
     
-    def plot_reconstruction(self, save_path=None):
+    def plot_reconstruction(self, save_path=None, ncols=5):
 
         pids = self.proteins
  
         recon_profile_data = self.recon_profiles
         ref_profile_data = self.train_profiles
+        ref_profile_data[ref_profile_data == 0.0] = np.nan
+        n, p = ref_profile_data.shape
  
         z = np.count_nonzero(np.isnan(ref_profile_data), axis=1)
- 
-        ncols = 5
-        nrows = 4
+        
+        step = int(0.1 * p)
+        thresholds = np.arange(0, step*5, step)
 
-        valid1 = (z > 0) & (z <= 7)
-        valid2 = (z > 7) & (z <= 14)
-        valid3 = (z > 14) & (z <= 21)
-        valid4 = (z > 21) & (z <= 28)
+        nrows = 0
+        valid = []
+        row_tags = []
+        
+        for i, t in enumerate(thresholds[:-1]):
+            t1 = max(1, t)
+            t2 = t + step
+            selection = ((z >= t1) & (z < t2)).nonzero()[0]
+        
+            if len(selection): # ONly have a row if there's something to show
+                np.random.shuffle(selection)
+                valid.append(selection[:ncols])
+                row_tags.append(f'{t1}-{t2-1}')
+                nrows += 1
+                
+            else:
+                break
  
-        valid1 = valid1.nonzero()[0]
-        valid2 = valid2.nonzero()[0]
-        valid3 = valid3.nonzero()[0]
-        valid4 = valid4.nonzero()[0]
-
-        np.random.shuffle(valid1)
-        np.random.shuffle(valid2)
-        np.random.shuffle(valid3)
-        np.random.shuffle(valid4)
- 
-        valid = np.concatenate([valid1[:ncols], valid2[:ncols], valid3[:ncols], valid4[:ncols]])
- 
-        row_tags = ['1-7','8-14','15-21','22-28']
- 
+        valid = np.concatenate(valid)
+  
         recon_profile_data = recon_profile_data[valid]
         ref_profile_data = ref_profile_data[valid]
  
-        recon_profile_data -= np.nanmin(recon_profile_data, axis=1)[:,None]
-        recon_profile_data /= np.nanmean(recon_profile_data, axis=1)[:,None]
-        recon_profile_data *= np.nanmean(ref_profile_data, axis=1)[:,None]
- 
-        #ref_profile_data /= np.nanmax(ref_profile_data, axis=1)[:,None]
- 
-        n, p = ref_profile_data.shape
- 
+        #recon_profile_data -= np.nanmin(recon_profile_data, axis=1)[:,None]
+        #recon_profile_data /= np.nanmean(recon_profile_data, axis=1)[:,None]
+        #recon_profile_data *= np.nanmean(ref_profile_data, axis=1)[:,None]
+         
         n_plots = ncols*nrows
  
         pids = pids[:n_plots]
@@ -1594,7 +1667,7 @@ class SchisomeDataSet(BaseDataSet):
                     extra.add(i+1)
  
             extra = np.array(sorted(extra))
- 
+            
             fill_profile = blank.copy()
             fill_profile[extra] = orig_profile[extra]
             fill_profile[missing] = recon_profile[missing]
@@ -1884,7 +1957,7 @@ class SchisomeDataSet(BaseDataSet):
             self.warn(f'Cannot write prediction TSV file prediction data "{pred_label}" not known')
             return
 
-        if not self.have_profile_label(score_label):
+        if not self.has_profile_key(score_label):
             self.warn(f'Cannot write prediction TSV file profile data "{score_label}" not known')
             return
         
@@ -2076,14 +2149,14 @@ class SchisomeDataSet(BaseDataSet):
                         self.info(f' .. {key}')
                         text = f'{proj_names[src]} {method.upper()} NN{nn}'
                         projections.append((key, text))
-                        proj_2d[key] = self.get_profile_proj_2d(src, method, min_nonzero=min_nonzero, recalc=True, umap_neighbours=nn)
+                        proj_2d[key] = self.get_profile_proj_2d(src, method, min_nonzero=min_nonzero, recalc=False, umap_neighbours=nn)
                 
                 else:
                     key = f'{src}_{method}'
                     text = f'{proj_names[src]} {method.upper()}'
                     projections.append((key, text))
                     self.info(f' .. {key}')
-                    proj_2d[key] = self.get_profile_proj_2d(src, method, min_nonzero=min_nonzero, recalc=True)
+                    proj_2d[key] = self.get_profile_proj_2d(src, method, min_nonzero=min_nonzero, recalc=False)
                 
         cursor = connection.cursor()
         cursor.executemany('INSERT INTO DataProjection (code, name) VALUES (?,?)', projections)
@@ -2103,7 +2176,7 @@ class SchisomeDataSet(BaseDataSet):
         pvals_dual = self.get_array_data('pval2')
         novelty = self.get_array_data('novelty')
         completeness = self.get_array_data('completeness')
-        singleness = self.get_array_data('singleness')
+        singleness = self.get_array_data('singularity')
         predictions1 = self.get_marker_data('prediction')
         predictions2 = self.get_marker_data('prediction2')
         
