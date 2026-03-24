@@ -86,6 +86,85 @@ class SchisomeDataSet(BaseDataSet):
         self.plot_proj_2d(profile_labels, class_labels, proj_methods, titles,
                           title=title, min_nonzero=min_nonzero, save_file=save_path,
                           color_dict=color_dict, spot_size=spot_size, label_ids=label_ids)    
+    
+    
+    def plot_class_restricted_umap_2d(self, classes, plot_size=8.0, spot_size=16,
+                                      alpha=1.0, max_missing=0.35, min_score=0.30, save_file=None):
+        
+        from umap import UMAP
+                
+        classes = sorted(classes)
+        class_title = ", ".join(classes)
+        self.info(f'Plotting class-restricted UMAP for {class_title}')
+
+        latent_key = self.latent_profile_key
+        zfill_key = self.zfill_profile_key
+        recon_key = self.recon_profile_key
+
+        self.info(f' .. fetch predictions')
+        pred_data = self.class_ensemble_preds
+        init_profiles = self.train_profiles
+        n, m = init_profiles.shape
+        valid = np.count_nonzero(np.isnan(init_profiles), axis=-1) <= int(max_missing*m) # E.g. one third
+        pred_data = pred_data[valid]
+ 
+        class_labels = self.train_labels + ['UNKNOWN']
+        class_mean = pred_data.mean(axis=1)
+ 
+        class_idx = np.array([class_labels.index(k) for k in classes])
+        class_scores = class_mean[:,class_idx]
+        selection = class_scores.sum(axis=1) >= min_score
+        
+        class_scores = class_scores[selection] # n1, k
+        n_plot = len(class_scores)
+        
+        profile_labels = [recon_key, latent_key]
+        titles = ['Reconstructed','Latent']
+        n_cols = len(profile_labels)
+        
+        plt.style.use('dark_background')
+        fig, axarr = plt.subplots(1, n_cols, squeeze=False)
+        fig.set_size_inches(n_cols * plot_size, plot_size)
+        
+        self.info(f' .. mix class colours')
+        class_colors = np.array([ColorConverter.to_rgb(COLOR_DICT[k]) for k in classes]) # k, 3
+        bg_color = np.array([0.5, 0.5, 0.5])[None,:]
+        
+        colors = (class_scores[:,:,None] * class_colors[None,:,:]).sum(axis=1) # n1, k, 1 * 1, k, 3 -> n1, k, 3 => n1, 3
+        colors += (1.0 - class_scores.sum(axis=1))[:,None] * bg_color # += n1, 1 * 1, 3 => n1, 3
+                    
+        for col, profile_label in enumerate(profile_labels):
+            ax = axarr[0, col]
+ 
+            profile_data = self.get_profile_data(profile_label)[valid][selection]
+            profile_data = np.nan_to_num(profile_data)
+
+            self.info(f' .. compute UMAP for {profile_label}')
+            kernel = UMAP(n_components=2, n_neighbors=50, min_dist=0.1, metric='correlation', random_state=7)
+
+            proj_model = kernel.fit(profile_data)
+            proj_2d = proj_model.transform(profile_data)
+ 
+            x_vals, y_vals = proj_2d.T
+        
+            ax.scatter(x_vals, y_vals, s=spot_size, alpha=alpha, marker='.', c=colors)
+            ax.set_title(profile_label)
+        
+        for k, klass in enumerate(classes):
+            ax.scatter([], [], label=klass, c=class_colors[k], s=spot_size, alpha=alpha, marker='.')
+
+        ax.legend(fontsize=7) # , loc='upper left')
+       
+        fig.suptitle(f'UMAP {class_title} [{n_plot:,}/{n:,}]', fontsize=16)
+        plt.subplots_adjust(left=0.03, bottom=0.05, right=0.95, top=0.92, wspace=0.1, hspace=0.1)
+ 
+        if save_file:
+            plt.savefig(save_file, dpi=400)
+            plt.clf()
+            self.info(f'Saved image to {save_file}')
+ 
+        else:
+            plt.show()
         
 
     def _plot_single_scatter_2d(self, ax, profile_label, class_label, proj_method, title,
@@ -101,7 +180,7 @@ class SchisomeDataSet(BaseDataSet):
 
             class_array = score_array.argmax(axis=-1)
             class_array[invalid] = 0
-            class_labels =    self.get_pred_class_labels(class_label) + ['unknown']
+            class_labels = self.get_pred_class_labels(class_label) + ['unknown']
  
             if duals:
                 duals = (sort_scores[:,-2:].sum(axis=-1) > 0.9) & (score_array.max(axis=-1) < 0.7)
@@ -209,7 +288,8 @@ class SchisomeDataSet(BaseDataSet):
                     ax.scatter(x_vals[idx][mask], y_vals[idx][mask], s=size*0.5, alpha=0.5, marker=marker, zorder=1, color=color)
 
                     mask = select_idx[idx] == 1
-                    ax.scatter(x_vals[idx][mask], y_vals[idx][mask], s=size, alpha=1.0, marker=marker, zorder=i+1, color=color, edgecolors='w', linewidth=0.5)
+                    ax.scatter(x_vals[idx][mask], y_vals[idx][mask], s=size, alpha=1.0, marker=marker,
+                               zorder=i+1, color=color, edgecolors='w', linewidth=0.5)
                     ax.scatter([], [], s=size, alpha=1.0, marker=marker, color=color, label=label)
  
                 else:
@@ -258,6 +338,9 @@ class SchisomeDataSet(BaseDataSet):
         fig.suptitle('{}'.format(title), fontsize=16)
  
         plt.subplots_adjust(left=0.03, bottom=0.05, right=0.95, top=0.92, wspace=0.1, hspace=0.1)
+        
+        print("plot_proj_2d")
+        plt.show()
  
         if save_file:
             plt.savefig(save_file, dpi=400)
@@ -288,7 +371,8 @@ class SchisomeDataSet(BaseDataSet):
             self.info(line)
     
     
-    def make_pvalues(self, fit=True, fit_distrib_points=200, rv=stats.beta, single_thresh=0.8, p_lim=1e-3):
+    def make_pvalues(self, fit=True, fit_distrib_points=200, rv=stats.beta,
+                     single_thresh=0.8, p_lim=1e-3, pval_percentile=10.0):
         
         def _ensemble_survival(rv, sample_values, distrib_points, group_step=100):
  
@@ -356,19 +440,26 @@ class SchisomeDataSet(BaseDataSet):
         pred_class_scores = self.class_ensemble_preds        
         n, m, nk = pred_class_scores.shape 
         distrib_points = np.linspace(0.0, 1.0, fit_distrib_points)
+        klass_labels = self.train_labels + ['UNKNOWN']
         
-        def _calc_p_pred(prot_scores, distrib_points, nk, rv, fit):
+        def _calc_p_pred(inp, distrib_points, nk, rv, fit):
+            pid, prot_scores = inp 
+            # dims: replicas, classes
             mean_scores = prot_scores.mean(axis=0)
             best_first = mean_scores.argsort()[::-1]
  
             # Single, dual
             k1, k2, k3 = best_first[:3]
-            mv1 = mean_scores[k1]
-            mv2 = mean_scores[k2]
+            
+            #mv1 = mean_scores[k1]
+            #mv2 = mean_scores[k2]            
+            # Threshold values; single, dual
+            thv1 = np.percentile(prot_scores[:,k1], pval_percentile)
+            thv2 = np.percentile(prot_scores[:,k1]+prot_scores[:,k2], pval_percentile)
             
             pdfs = np.array([np.array(_ensemble_pdfs(rv, prot_scores[:,j], distrib_points)) for j in range(nk)])
-            t = int(mv1*fit_distrib_points) # threshold index
-            t2 = int((mv1+mv2)*fit_distrib_points)
+            t = int(thv1*fit_distrib_points) # threshold index
+            t2 = int(thv2*fit_distrib_points)
 
             # k x m x p -> k x p
             pdfs = pdfs.mean(axis=1) # Mean over models
@@ -398,40 +489,40 @@ class SchisomeDataSet(BaseDataSet):
                 sing = np.count_nonzero(prot_scores[:,k1] > single_thresh)/m
                 dual = np.count_nonzero(prot_scores[:,(k1, k2)].sum(axis=1) > single_thresh)/m
             
-            return (p1, p2, sing, dual)
+            """
+            # For illustrating the process, QC
+            if str(pid) in ('Q8K363'):
+                print(f'* * * * * * * * * * * * * * * * * * *')
+                fig, (ax1, ax2) = plt.subplots(1, 2)
+ 
+                ax1.set_title(f'{pid}')
+                ax1.plot(distrib_points, pdfs[k1], label=f'{klass_labels[k1]} {mean_scores[k1]:.3}', color=COLOR_DICT[klass_labels[k1]])
+                ax1.plot(distrib_points, pdfs[k2], label=f'{klass_labels[k2]} {mean_scores[k2]:.3}', color=COLOR_DICT[klass_labels[k2]])
+                ax1.plot(distrib_points, pdfs[k3], label=f'{klass_labels[k3]} {mean_scores[k3]:.3}', color=COLOR_DICT[klass_labels[k3]])
+                ax1.set_xlabel('DNN score')
+                ax1.set_ylabel('Probability density')
+                ax1.legend()
+ 
+                ax2.set_title(f'{pid}')
+                ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k1], distrib_points), label=klass_labels[k1], color=COLOR_DICT[klass_labels[k1]])
+                ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k2], distrib_points), label=klass_labels[k2], color=COLOR_DICT[klass_labels[k2]])
+                ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k3], distrib_points), label=klass_labels[k3], color=COLOR_DICT[klass_labels[k3]])
+                ax2.set_xlabel('DNN score')
+                ax2.set_ylabel('Survival')
+                ax2.legend()
+ 
+                plt.show()
+            """
             
-        results = parallel_run(_calc_p_pred, pred_class_scores,
+            return (p1, p2, sing, dual)
+        
+        data = zip(self.proteins, pred_class_scores)    
+        results = parallel_run(_calc_p_pred, data, #pred_class_scores,
                                common_args=(distrib_points, nk, rv, fit), common_kw={},
                                num_cpu=MAX_CORES, verbose=True, local_cpu_arg=None)
                                 
         p_values1, p_values2, singularity, duality = [np.array(x) for x in zip(*results)]    
                                 
-        """
-        # For illustrating the process            
-        for i in range(n):
-                            fig, (ax1, ax2) = plt.subplots(1, 2)
-            
-            ax1.set_title(f'{self.proteins[i]}')
-            ax1.plot(distrib_points, pdfs[k1], label=klass_labels[k1], color=COLOR_DICT[klass_labels[k1]])
-            ax1.plot(distrib_points, pdfs[k2], label=klass_labels[k2], color=COLOR_DICT[klass_labels[k2]])
-            ax1.plot(distrib_points, pdfs[k3], label=klass_labels[k3], color=COLOR_DICT[klass_labels[k3]])
-            ax1.set_xlabel('DNN score')
-            ax1.set_ylabel('Probability density')
-            ax1.legend()
-            
-            ax2.set_title(f'{self.proteins[i]}')
-            ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k1], distrib_points), label=klass_labels[k1], color=COLOR_DICT[klass_labels[k1]])
-            ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k2], distrib_points), label=klass_labels[k2], color=COLOR_DICT[klass_labels[k2]])
-            ax2.plot(distrib_points, _ensemble_survival(rv, prot_scores[:,k3], distrib_points), label=klass_labels[k3], color=COLOR_DICT[klass_labels[k3]])
-            ax2.set_xlabel('DNN score')
-            ax2.set_ylabel('Survival')
-            ax2.legend()
-            
-            plt.show()
-
-            if i % 100 == 0:           
-                self.info(f'{i:,} {n:,}', end='\r')
-        """
 
         is_dbl = (p_values1 > p_lim) & (p_values2 <= p_lim)
         p_values = p_values1.copy()
@@ -467,7 +558,7 @@ class SchisomeDataSet(BaseDataSet):
             p1 = p_values1[i]
             p2 = p_values2[i]
             
-            if (p1 < p_lim) and (mv1 > 0.8): #  or mv1 > 0.5:
+            if (p1 < p_lim) and (mv2 < 0.2): #  or mv1 > 0.5:
                 pred1 = k1
                 pred2 = -1
  
@@ -899,7 +990,7 @@ class SchisomeDataSet(BaseDataSet):
         n1 = float(n_single1 + n_double1 + n_other1)
         pc_single1 = 100.0 * n_single1/n1
         pc_double1 = 100.0 * n_double1/n1
-        pc_other1    = 100.0 * n_other1/n1
+        pc_other1  = 100.0 * n_other1/n1
  
         n_single2 = np.count_nonzero(single & p_med)
         n_double2 = np.count_nonzero(double & p_med)
@@ -2060,11 +2151,12 @@ class SchisomeDataSet(BaseDataSet):
         self.info(f'Wrote {n_prots:,} protein lines to {out_file_path}')
         
     
-    def write_database(self, db_file_path, max_missing=0.35, min_contrib=0.05):
+    def write_database(self, db_file_path, max_missing=0.35, min_contrib=0.1):
         
         import sqlite3
         
         aux_annos = self._aux_markers_key
+        print('Aux', aux_annos)
         
         if 'pval' not in self.array_keys: 
             self.make_class_predictions() # prediction classes, pval, dulity etc.
@@ -2106,11 +2198,12 @@ class SchisomeDataSet(BaseDataSet):
 
         class_labels2 = self.get_marker_labels(aux_annos) + ['UNKNOWN']
         suborganelles = [class_labels2[x] for x in self.get_marker_data(aux_annos)]
-
+        
         self.info('Add Compartments')
         cursor = connection.cursor()
         codes = set([DB_ORGANELLE_CONV_DICT.get(code, code) for code in organelles + suborganelles])
         inserts = [(code, DB_ORGANELLE_INFO[code][0], DB_ORGANELLE_INFO[code][1]) for code in codes]
+
         cursor.executemany('INSERT INTO Compartment (code, name, color) VALUES (?,?,?)', inserts)
         cursor.close()
         connection.commit()
@@ -2137,14 +2230,44 @@ class SchisomeDataSet(BaseDataSet):
         proj_2d = {}
         min_nonzero = 1.0 - max_missing        
         
-        self.info('Add Data Projections')        
+        self.info('Add Data Projections')
+        
+        restriction_min_score = 0.3
+        restrict_groups = {'SECRETORY':['ER', 'GOLGI', 'PM', 'TGN'],
+                           'CHR-MT-PRX-CYT':['CYTOSOL', 'CHLOROPLAST', 'MITOCHONDRION', 'PEROXISOME'],
+                           'PM-CYT-NUC-ER-PM':['NUCLEUS', 'ER', 'PM', 'CYTOSOL'],
+                           'CARGO+':['EXTRACELLULAR', 'TGN', 'CHLOROPLAST', 'ER','GOLGI'],
+                          }
+         
+        from umap import UMAP
+        
         projections = []
         for src in proj_srcs:
+            for name, klasses in restrict_groups.items():
+                key = f'{src}_UMAP_{name}'
+                text = f'{proj_names[src]} UMAP {name}'
+                projections.append((key, text))
+                self.info(f' .. {key}')
+
+                class_idx = np.array([class_labels.index(k) for k in klasses])
+                class_scores = class_mean[:,class_idx]
+                selection = class_scores.sum(axis=1) >= restriction_min_score
+
+                profile_data_all = np.nan_to_num(self.get_profile_data(src))
+                profile_data = profile_data_all[selection]
+
+                kernel = UMAP(n_components=2, n_neighbors=50, min_dist=0.1, metric='correlation', random_state=7)
+                proj_model = kernel.fit(profile_data)
+                
+                proj_2d[key] = proj_model.transform(profile_data_all)
+                proj_2d[key][invalid] = 0.0
+                proj_2d[key][~selection] = 0.0
+        
             for method in ('umap', 'pca'):
                 text = f'{proj_names[src]} {method.upper()}'
                 
                 if method == 'umap':
-                    for nn in (30,20,10):
+                    for nn in (50,30,10):
                         key = f'{src}_{method}_{nn}'
                         self.info(f' .. {key}')
                         text = f'{proj_names[src]} {method.upper()} NN{nn}'
@@ -2202,7 +2325,7 @@ class SchisomeDataSet(BaseDataSet):
 
             train_organelle = DB_ORGANELLE_CONV_DICT.get(organelles[i], organelles[i])
             suborganelle = DB_ORGANELLE_CONV_DICT.get(suborganelles[i], suborganelles[i])
-                        
+                      
             likely_single = 'YES' if float(singleness[i]) > 0.9 else 'NO'
             
             k1 = predictions1[i]
@@ -2218,7 +2341,7 @@ class SchisomeDataSet(BaseDataSet):
                 
                 if mn >= min_contrib:
                     lbl = class_labels[k]
-                    if mn < 0.1:
+                    if mn < 0.15:
                         lbl = f'{lbl.lower()}?'
                     elif mn < 0.2:
                         lbl = lbl.lower()
@@ -2236,7 +2359,10 @@ class SchisomeDataSet(BaseDataSet):
         
             for key in proj_2d:
                 x, y = proj_2d[key][i]
-                protein_coord_inserts.append((key, pid, float(x), float(y)))
+                x = float(x)
+                y = float(y)
+                if x * y:
+                    protein_coord_inserts.append((key, pid, x, y))
 
         sql_smt = 'INSERT INTO Protein (pid, alt_ids, description, gene_name, train_organelle, suborganelle, singleness, likely_single, pred_class1, pred_class2, pred_class3, pred_text, p_val, p_val_single, p_val_dual, completeness, novelty) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         _chunked_execute(connection, protein_inserts, sql_smt) 
@@ -2342,8 +2468,8 @@ class SchisomeDataSet(BaseDataSet):
                                     clear_train_class[idx[a]] = True
                                     n_peripheral += 1
  
-                           n_remove = clear_train_class[idx].sum()
-                           self.info(f' .. pruned class {klass} : removed {n_remove:,} of {len(idx):,} ; peripheral {n_peripheral:,}')
+                       n_remove = clear_train_class[idx].sum()
+                       self.info(f' .. pruned class {klass} : removed {n_remove:,} of {len(idx):,} ; peripheral {n_peripheral:,}')
  
  
              marker_idx[clear_train_class] = -1

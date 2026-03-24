@@ -335,7 +335,7 @@ class BaseDataSet:
         return up_dict
 
 
-    def normalize_profiles_max(self, key, col_norm=False, eps=1e-5):
+    def normalize_profiles_max(self, key, col_norm=False):
      
         profile_data = self.get_profile_data(key)
 
@@ -346,9 +346,9 @@ class BaseDataSet:
                 col = profile_data[:,k]
                 profile_data[:,k] /= np.median(col[col > 0])
         
-        mn = np.nanmax(profile_data, axis=1)
+        mn = np.nanmin(profile_data, axis=1)
         profile_data -= mn[:,None]
-        profile_data += eps
+        profile_data += 1e-5
          
         mx = np.nanmax(profile_data, axis=1)
         nz = mx != 0.0
@@ -962,10 +962,12 @@ class BaseDataSet:
             self.warn(f'Replacing marker set {label}')
          
         id_mapping = self.id_map
+        rev_id_map = self.rev_id_map
         
         pids = set(self.proteins)
         klass_dict = {}
         unknown = set()
+        
         
         with open_file(file_path) as file_obj:
             head1 = file_obj.readline()
@@ -1002,7 +1004,15 @@ class BaseDataSet:
                     pid = pid.split(';')[0]
                     pid = pid.split('-')[0]
                     
-                
+                    if pid not in pids:
+                        print('##', pid, rev_id_map.get(pid), id_mapping.get(pid))
+                        if pid in rev_id_map:
+                            pid = list(rev_id_map[pid])[0]
+ 
+                        else:
+                            pid = id_mapping.get(pid, pid)
+ 
+                    
                 klass_dict[pid] = klass
         
         missing = set(klass_dict) - pids
